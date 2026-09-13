@@ -115,7 +115,7 @@
 - **Force enable translate**: Always keeps tweet translation button enabled.
 - **Show poll results**: Reveals poll results without requiring vote submission.
 - **Hide banner**: Hides promotional and verification banners.
-- **Disable blur effects**: Removes blur overlay on sensitive or NSFW media.
+- **Disable blur effects**: Removes blur on UI to reduce lag
 
 ### YouTube (`com.google.android.youtube`)
 - **Remove ads**: Removes home feed ads, search ads, banner ads, and in-video promotions.
