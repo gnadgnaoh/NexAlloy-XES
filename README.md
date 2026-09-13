@@ -8,7 +8,7 @@
 
 >[!IMPORTANT]  
 > - This is **NOT an official Morphe or ReVanced project**, do not ask their developers for help.  
-> - **Root access** is strictly **required** to use this module!
+> - **Root access** is **not required** to use this module!
 > - **Having issues?** Check the **[FAQ](https://github.com/NexAlloy/NexAlloy/wiki/Frequently-Asked-Questions)** before reporting.
 
 ## Downloads
