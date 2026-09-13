@@ -22,7 +22,7 @@ val FilterFeedAds = patch(
     description = "Drops sponsored items from the Nhật ký feed at the JSON parse layer, " +
             "before any view is created. Experimental — turn this off first if posts go " +
             "missing from your feed.",
-    use = false,
+    use = true,
 ) {
     ::feedItemPreCheckFingerprint.hookMethod {
         after { param ->
