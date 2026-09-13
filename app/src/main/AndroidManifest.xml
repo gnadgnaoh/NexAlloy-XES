@@ -16,6 +16,15 @@
         <package android:name="com.instagram.barcelona" />
         <package android:name="com.strava" />
         <package android:name="com.alltrails.alltrails" />
+        <package android:name="com.facebook.katana" />
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.twitter.android" />
+        <package android:name="com.zing.zalo" />
+        <package android:name="ch.protonvpn.android" />
+        <package android:name="com.soundcloud.android" />
+        <package android:name="com.google.android.gm" />
+        <package android:name="com.zhiliaoapp.musically" />
+        <package android:name="com.ss.android.ugc.trill" />
     </queries>
 
     <application
