@@ -46,7 +46,7 @@
 
 ### Facebook (`com.facebook.katana`)
 - **Hide Facebook ads**: Hides all ads.
-- 
+  
 ### Gmail (`com.google.android.gm`)
 - **Hide ads**: Removes sponsored conversation rows and promotions rendered in inbox.
 
