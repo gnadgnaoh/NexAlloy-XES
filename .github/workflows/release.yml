@@ -134,14 +134,32 @@ jobs:
     - name: Rename APKs
       run: |
         TAG=${{ steps.tag.outputs.tag }}
+        BRANCHES='${{ needs.setup.outputs.branches }}'
 
-        for dir in artifacts/nexalloy-ci-*-release-apk; do
-          NAME=$(basename "$dir")
-          BRANCH=$(echo "$NAME" | sed 's/nexalloy-ci-\(.*\)-release-apk/\1/')
+        shopt -s nullglob
+        dirs=(artifacts/nexalloy-ci-*-release-apk)
+        shopt -u nullglob
 
-          APK=$(find "$dir" -name "app-release.apk" | head -1)
-          mv "$APK" "artifacts/NexAlloy-${BRANCH}-release-${TAG}.apk"
-        done
+        if [ ${#dirs[@]} -gt 0 ]; then
+          for dir in "${dirs[@]}"; do
+            NAME=$(basename "$dir")
+            BRANCH=$(echo "$NAME" | sed 's/nexalloy-ci-\(.*\)-release-apk/\1/')
+
+            APK=$(find "$dir" -type f -name "*.apk" | head -1)
+            if [ -n "$APK" ]; then
+              mv "$APK" "artifacts/NexAlloy-${BRANCH}-release-${TAG}.apk"
+            fi
+          done
+        else
+          BRANCH=$(echo "$BRANCHES" | jq -r '.[0]')
+          APK=$(find artifacts -type f -name "*.apk" | head -1)
+          if [ -n "$APK" ]; then
+            mv "$APK" "artifacts/NexAlloy-${BRANCH}-release-${TAG}.apk"
+          else
+            echo "Error: No APK found in artifacts"
+            exit 1
+          fi
+        fi
 
     - name: Prepare release body
       id: body
