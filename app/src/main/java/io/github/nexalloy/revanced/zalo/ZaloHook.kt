@@ -8,6 +8,7 @@ import io.github.nexalloy.revanced.zalo.ads.HideStoryAds
 import io.github.nexalloy.revanced.zalo.ads.SkipFeedAdsBinding
 import io.github.nexalloy.revanced.zalo.adtima.DisableAdtimaAdRequests
 import io.github.nexalloy.revanced.zalo.adtima.DisableAdtimaVideoAdRequests
+import io.github.nexalloy.revanced.zalo.calls.AutoRecordCalls
 import io.github.nexalloy.revanced.zalo.tracking.DisableAdsTracking
 
 val ZaloPatches = arrayOf<Patch>(
@@ -19,4 +20,5 @@ val ZaloPatches = arrayOf<Patch>(
     DisableAdtimaAdRequests,
     DisableAdtimaVideoAdRequests,
     DisableAdsTracking,
+    AutoRecordCalls,
 )
