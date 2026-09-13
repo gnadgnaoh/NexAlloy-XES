@@ -1,20 +1,40 @@
-name: Android Release CI
+name: Release CI
 
 on:
-  push:
-    tags:
-      - '*.*.*'
+  workflow_dispatch:
 
 jobs:
-  build:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.info.outputs.prerelease }}
+      branches: ${{ steps.info.outputs.branches }}
+    steps:
+    - name: Determine build info
+      id: info
+      run: |
+        BRANCH="${GITHUB_REF##*/}"
+        if [ "$BRANCH" = "root" ] || [ "$BRANCH" = "nonroot" ]; then
+          echo "prerelease=0" >> $GITHUB_OUTPUT
+          echo 'branches=["root","nonroot"]' >> $GITHUB_OUTPUT
+        else
+          echo "prerelease=1" >> $GITHUB_OUTPUT
+          echo "branches=[\"${BRANCH}\"]" >> $GITHUB_OUTPUT
+        fi
 
+  build:
+    needs: setup
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      matrix:
+        branch: ${{ fromJson(needs.setup.outputs.branches) }}
 
     steps:
     - uses: actions/checkout@v6
       with:
+        ref: ${{ matrix.branch }}
         submodules: true
 
     - name: set up JDK
@@ -22,25 +42,129 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
     - name: Write key
+      env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          K_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          K_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
       run: |
-        echo KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} > signing.properties
-        echo KEYSTORE_ALIAS=${{ secrets.KEYSTORE_ALIAS }} >> signing.properties
-        echo KEYSTORE_ALIAS_PASSWORD='${{ secrets.KEYSTORE_ALIAS_PASSWORD }}' >> signing.properties
-        echo KEYSTORE_FILE=../key.jks >> signing.properties
-        echo ${{ secrets.KEYSTORE }} | base64 --decode > key.jks
+          echo "$KEYSTORE_B64" | tr -d '\r\n ' | base64 -d > release.jks
+          
+          printf "KEYSTORE_PASSWORD=%s\n" "$K_PASS" > signing.properties
+          printf "KEYSTORE_ALIAS=%s\n" "$K_ALIAS" >> signing.properties
+          printf "KEYSTORE_ALIAS_PASSWORD=%s\n" "$K_PASS" >> signing.properties
+          printf "KEYSTORE_FILE=../release.jks\n" >> signing.properties
 
     - name: Build Release
-      run: ./gradlew assembleRelease
+      run: ./gradlew --build-cache assembleRelease
 
-    - run: |
-        cd app/build/outputs/apk/release/
-        mv app-release.apk NexAlloy-${{ github.ref_name }}.apk
-        gh release create --prerelease ${{ github.ref_name }} NexAlloy-${{ github.ref_name }}.apk
+    - name: Upload a Release Artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: nexalloy-ci-${{ matrix.branch }}-release-apk
+        path: |
+          app/build/outputs/apk/release
+          app/build/outputs/mapping/release/mapping.txt
+
+  release:
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Determine tag
+      id: tag
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        PRERELEASE=${{ needs.setup.outputs.prerelease }}
+        REPO=${{ github.repository }}
+
+        LATEST_RELEASE=$(curl -s -H "Authorization: token $GH_TOKEN" \
+          "https://api.github.com/repos/${REPO}/releases?per_page=20" | \
+          jq -r '[.[] | select(.prerelease == false)] | first | .tag_name // empty')
+
+        if [ "$PRERELEASE" = "0" ]; then
+          if [ -z "$LATEST_RELEASE" ]; then
+            TAG="v1.0"
+          else
+            MAJOR=$(echo "$LATEST_RELEASE" | sed 's/v\([0-9]*\)\..*/\1/')
+            TAG="v$((MAJOR + 1)).0"
+          fi
+        else
+          if [ -z "$LATEST_RELEASE" ]; then
+            LATEST_PRE=$(curl -s -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${REPO}/releases?per_page=20" | \
+              jq -r '[.[] | select(.prerelease == true) | select(.tag_name | test("^v1\\."))] | first | .tag_name // empty')
+            if [ -z "$LATEST_PRE" ]; then
+              TAG="v1.1"
+            else
+              MINOR=$(echo "$LATEST_PRE" | sed 's/v[0-9]*\.\([0-9]*\)/\1/')
+              TAG="v1.$((MINOR + 1))"
+            fi
+          else
+            MAJOR=$(echo "$LATEST_RELEASE" | sed 's/v\([0-9]*\)\..*/\1/')
+            LATEST_PRE=$(curl -s -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${REPO}/releases?per_page=20" | \
+              jq -r --arg major "v${MAJOR}." '[.[] | select(.prerelease == true) | select(.tag_name | startswith($major))] | first | .tag_name // empty')
+            if [ -z "$LATEST_PRE" ]; then
+              TAG="v${MAJOR}.1"
+            else
+              MINOR=$(echo "$LATEST_PRE" | sed 's/v[0-9]*\.\([0-9]*\)/\1/')
+              TAG="v${MAJOR}.$((MINOR + 1))"
+            fi
+          fi
+        fi
+
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+    - name: Download Artifacts
+      uses: actions/download-artifact@v8
+      with:
+        path: artifacts
+
+    - name: Rename APKs
+      run: |
+        TAG=${{ steps.tag.outputs.tag }}
+
+        for dir in artifacts/nexalloy-ci-*-release-apk; do
+          NAME=$(basename "$dir")
+          BRANCH=$(echo "$NAME" | sed 's/nexalloy-ci-\(.*\)-release-apk/\1/')
+
+          APK=$(find "$dir" -name "app-release.apk" | head -1)
+          mv "$APK" "artifacts/NexAlloy-${BRANCH}-release-${TAG}.apk"
+        done
+
+    - name: Prepare release body
+      id: body
+      run: |
+        PRERELEASE=${{ needs.setup.outputs.prerelease }}
+        if [ "$PRERELEASE" = "1" ]; then
+          BRANCH="${GITHUB_REF##*/}"
+          echo "body=Build from branch: ${BRANCH}" >> $GITHUB_OUTPUT
+        else
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "Download non-root version from:" >> $GITHUB_OUTPUT
+          echo "https://github.com/gnadgnaoh/NexAlloy-NonRoot/releases" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2.6.2
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        name: NexAlloy ${{ steps.tag.outputs.tag }}
+        body: ${{ steps.body.outputs.body }}
+        prerelease: ${{ needs.setup.outputs.prerelease == '1' }}
+        make_latest: ${{ needs.setup.outputs.prerelease == '0' }}
+        files: artifacts/NexAlloy-*-${{ steps.tag.outputs.tag }}.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
