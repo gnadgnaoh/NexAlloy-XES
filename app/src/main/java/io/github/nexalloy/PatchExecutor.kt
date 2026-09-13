@@ -165,14 +165,27 @@ class PatchExecutor(
     // cache
     private val moduleRel = BuildConfig.COMMIT_HASH
     private var cache = SharedPrefCache(appContext)
-    private var dexkit = run {
+    private val dexSource = dexSourceByPackage[lpparam.packageName] ?: DexSource.APK_PATH
+
+    init {
         System.loadLibrary("dexkit")
         DexKitCacheBridge.init(cache)
-        DexKitCacheBridge.create("", lpparam.applicationInfo.sourceDir)
     }
 
+    private fun openDexKit() = when (dexSource) {
+        DexSource.CLASS_LOADER -> DexKitCacheBridge.create(lpparam.packageName, classLoader)
+        DexSource.APK_PATH -> DexKitCacheBridge.create("", lpparam.applicationInfo.sourceDir)
+    }
+
+    private var dexkit = openDexKit()
+    
     fun applyPatches(patches: Array<Patch>) {
         this.patches = patches
+        if (dexSource == DexSource.CLASS_LOADER) {
+            runCatching { dexkit.close() }
+            dexGate = KatanaDexGate(this).also { it.start() }
+            return
+        }
         val t = measureTimeMillis {
             loadCacheIfValid()
             try {
@@ -186,6 +199,46 @@ class PatchExecutor(
         Logger.printDebug { "${lpparam.packageName} handleLoadPackage: ${t}ms" }
     }
 
+    private var dexGate: KatanaDexGate? = null
+    private var cacheChecked = false
+
+    internal val enabledPatchCount: Int
+        get() = patches.count { patchPreferences?.getBoolean(it.name, it.use) ?: it.use }
+
+    internal val outstandingPatchCount: Int
+        get() = enabledPatchCount - appliedPatches.size
+
+    internal fun runDeferredAttempt(finalAttempt: Boolean, probe: () -> Boolean): Boolean {
+        if (!finalAttempt && !runCatching { probe() }.getOrDefault(false)) {
+            Logger.printDebug { "${lpparam.packageName}: dex not ready yet, will retry" }
+            return false
+        }
+        val bridge = runCatching { openDexKit() }.getOrElse { err ->
+            XposedBridge.log(err)
+            return false
+        }
+        try {
+            dexkit = bridge
+            if (!cacheChecked) {
+                loadCacheIfValid()
+                cacheChecked = true
+            }
+            failedPatches.clear()
+            val t = measureTimeMillis { executePatches() }
+            Logger.printDebug {
+                "${lpparam.packageName} attempt: ${t}ms applied=${appliedPatches.size}/$enabledPatchCount"
+            }
+            val done = outstandingPatchCount <= 0 && failedPatches.isEmpty()
+            if (done || finalAttempt) {
+                finalizePatching()
+                logDebugInfo()
+            }
+            return done
+        } finally {
+            runCatching { bridge.close() }
+        }
+    }
+    
     @Suppress("UNCHECKED_CAST")
     private fun loadCacheIfValid() {
         // cache by host update time + module version
