@@ -168,5 +168,5 @@ or [Create an issue](https://github.com/NexAlloy/NexAlloy/issues/new/choose)
 
 [DexKit](https://luckypray.org/DexKit/en/): a high-performance dex runtime parsing library.  
 [Morphe](https://morphe.software): Transform Your Android Apps  
-[ReVanced](https://revanced.app): Continuing the legacy of Vanced at [revanced.app](https://revanced.app)
+[ReVanced](https://revanced.app): Continuing the legacy of Vanced
 [Zalo Patch](https://github.com/amarinne/zalo-patch): Zalo customization module for LSPosed.
