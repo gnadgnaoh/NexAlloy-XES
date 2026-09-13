@@ -9,7 +9,7 @@ val HideStoryAds = patch(
     name = "Hide story ads",
     description = "Hides sponsored items in the story viewer. Verify the story tray still " +
             "advances before relying on this.",
-    use = false,
+    use = true,
 ) {
     ::storyAdsBindFingerprint.hookMethod {
         after { param -> (param.thisObject as? View)?.keepHiddenAsAd() }
