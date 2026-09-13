@@ -156,7 +156,7 @@
 - **Block Adtima ad requests**: Blocks outbound network requests to Adtima ad server endpoints.
 - **Block Adtima video ad requests**: Blocks Adtima video ad calls.
 - **Disable ads tracking**: Disables tracking telemetry and ad impression reporting.
-- **Call audio recording.**: Enable call recording both voice call and video call (audio only)
+- **Call audio recording**: Enable call recording both voice call and video call (audio only)
 
 ---
 
