@@ -50,3 +50,9 @@ or [Create an issue](https://github.com/NexAlloy/NexAlloy/issues/new/choose)
 [ReVanced](https://revanced.app): Continuing the legacy of Vanced at [revanced.app](https://revanced.app)
 
 [Zalo Patch](https://github.com/amarinne/zalo-patch): Zalo customization module for LSPosed.
+
+## ❤️ Special Thanks
+
+- **[trnthanhhuy](https://t.me/trnthanhhuy)**: for sponsoring and supporting the project from day one.
+- **Allen Chang**: for testing and reporting issues to improve the Facebook patch code.
+- **[FiorenMas](https://github.com/FiorenMas/)**: for technical support.
