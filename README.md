@@ -39,7 +39,7 @@
 
 ## Supports
 <a href="https://t.me/unofficalrevancedchat"><img alt="Telegram Channel" src="https://img.shields.io/badge/Telegram_Channel-blue.svg?logo=telegram&logoColor=white"></a>
-or [Create an issue](https://github.com/NexAlloy/NexAlloy/issues/new/choose)
+or [Create an issue](https://github.com/gnadgnaoh/SexAlloy/issues/new/choose)
 
 ## ⭐ Credits
 
