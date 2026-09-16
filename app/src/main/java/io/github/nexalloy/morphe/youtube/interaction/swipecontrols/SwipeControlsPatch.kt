@@ -3,6 +3,7 @@ package io.github.nexalloy.morphe.youtube.interaction.swipecontrols
 import android.view.View
 import app.morphe.extension.shared.settings.preference.ColorPickerWithOpacitySliderPreference
 import app.morphe.extension.shared.settings.preference.SeekBarPreference
+import app.morphe.extension.youtube.settings.preference.SwipeVolumeStepsPreference
 import app.morphe.extension.youtube.settings.preference.SwipeZonePreference
 import app.morphe.extension.youtube.swipecontrols.SwipeControlsHostActivity
 import io.github.nexalloy.morphe.shared.misc.settings.preference.InputType
@@ -73,9 +74,13 @@ val SwipeControls = patch(
             selectable = true,
         ),
         NonInteractivePreference(
-            key = "morphe_swipe_volume_sensitivity",
+            key = "morphe_swipe_volume_distance",
             tag = SeekBarPreference::class.java,
             selectable = true,
+        ),
+        ListPreference(
+            "morphe_swipe_volume_steps",
+            tag = SwipeVolumeStepsPreference::class.java
         ),
         NonInteractivePreference(
             key = "morphe_swipe_speed_sensitivity",

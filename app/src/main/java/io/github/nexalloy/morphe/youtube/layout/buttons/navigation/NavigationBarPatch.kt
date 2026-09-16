@@ -10,7 +10,6 @@ import io.github.nexalloy.morphe.youtube.misc.navigation.NavigationBarHook
 import io.github.nexalloy.morphe.youtube.misc.navigation.hookNavigationButtonCreated
 import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_31_or_greater
-import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_46_or_greater
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.patch
 import io.github.nexalloy.scopedHook
@@ -39,7 +38,7 @@ val NavigationBar = patch(
 //        SwitchPreference("morphe_narrow_navigation_buttons", summary = true),  // TODO PivotBarChanged/PivotBarStyle METHOD_MID
         SwitchPreference("morphe_hide_navigation_button_labels"),
         SwitchPreference("morphe_navigation_bar_animations", summary = true),
-        SwitchPreference("morphe_disable_translucent_navigation", summary = true)
+//        SwitchPreference("morphe_disable_translucent_navigation", summary = true)
     )
 
     if (is_20_31_or_greater) {
@@ -80,18 +79,7 @@ val NavigationBar = patch(
 
     // TODO Hide navigation bar — addBottomBarContainerHook
 
-    // Force on/off translucent effect on status bar and navigation buttons.
-    // Translucent status bar.
-    insertLiteralOverride(45400535L, NavigationBarPatch::useTranslucentNavigation)
-    // Translucent system buttons feature flag.
-    insertLiteralOverride(45632194L, NavigationBarPatch::useTranslucentNavigation)
-    // Translucent navigation bar buttons feature flag.
-    insertLiteralOverride(45630927L, NavigationBarPatch::useTranslucentNavigation)
-
-    if (is_20_46_or_greater) {
-        // Feature interferes with translucent status bar and must be forced off.
-        insertLiteralOverride(45736608L, NavigationBarPatch::allowCollapsingToolbarLayout)
-    }
+    // TODO Paint over the translucent status bar and navigation bar
 
     // Animated navigation tabs.
     insertLiteralOverride(45680008L, NavigationBarPatch::useAnimatedNavigationButtons)

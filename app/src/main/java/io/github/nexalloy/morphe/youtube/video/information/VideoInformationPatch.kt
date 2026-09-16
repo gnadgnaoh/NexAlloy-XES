@@ -307,7 +307,7 @@ val VideoInformationPatch = patch(
         }
     }
 
-    // TODO ChannelInformationFingerprint
+    // TODO Set channel information.
 
 
     // region ExoPlayerImpl.
