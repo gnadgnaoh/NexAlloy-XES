@@ -2,10 +2,14 @@ package io.github.nexalloy.morphe.youtube.layout.buttons.navigation
 
 import android.widget.TextView
 import app.morphe.extension.youtube.patches.NavigationBarPatch
+import io.github.nexalloy.morphe.setExtensionIsPatchIncluded
 import io.github.nexalloy.morphe.shared.misc.settings.preference.PreferenceScreenPreference
 import io.github.nexalloy.morphe.shared.misc.settings.preference.PreferenceScreenPreference.Sorting
 import io.github.nexalloy.morphe.shared.misc.settings.preference.SwitchPreference
 import io.github.nexalloy.morphe.youtube.insertLiteralOverride
+import io.github.nexalloy.morphe.youtube.misc.contexthook.Endpoint
+import io.github.nexalloy.morphe.youtube.misc.contexthook.addOSNameHook
+import io.github.nexalloy.morphe.youtube.misc.contexthook.clientContextHookPatch
 import io.github.nexalloy.morphe.youtube.misc.navigation.NavigationBarHook
 import io.github.nexalloy.morphe.youtube.misc.navigation.hookNavigationButtonCreated
 import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
@@ -17,10 +21,14 @@ import org.luckypray.dexkit.wrap.DexMethod
 
 val NavigationBar = patch(
     name = "Navigation bar",
-    description = "Adds options to hide and change the bottom navigation bar (such as the Shorts button)" +
-            " and the upper navigation toolbar.",
+    description = "Adds options to hide and change the bottom navigation bar (such as the Shorts button) "
+            + "and the upper navigation toolbar.",
 ) {
-    dependsOn(NavigationBarHook, VersionCheck)
+    dependsOn(
+        NavigationBarHook,
+        VersionCheck,
+        clientContextHookPatch,
+    )
 
     val navPreferences = mutableSetOf(
         SwitchPreference("morphe_hide_home_button"),
@@ -28,14 +36,14 @@ val NavigationBar = patch(
         SwitchPreference("morphe_hide_create_button"),
         SwitchPreference("morphe_hide_subscriptions_button"),
         SwitchPreference("morphe_hide_notifications_button"),
-//        SwitchPreference("morphe_show_search_button"),         // TODO PivotBarRenderer proto
-//        ListPreference("morphe_show_search_button_index"),     // TODO PivotBarRenderer proto
-//        SwitchPreference("morphe_show_settings_button"),       // TODO PivotBarRenderer proto
-//        ListPreference("morphe_show_settings_button_index"),   // TODO PivotBarRenderer proto
-//        SwitchPreference("morphe_show_settings_button_type", summary = true),  // TODO PivotBarRenderer proto
+//        SwitchPreference("morphe_show_search_button"),
+//        ListPreference("morphe_show_search_button_index"),
+//        SwitchPreference("morphe_show_settings_button"),
+//        ListPreference("morphe_show_settings_button_index"),
+//        SwitchPreference("morphe_show_settings_button_type", summary = true),
         SwitchPreference("morphe_swap_create_with_notifications_button", summary = true),
-//        SwitchPreference("morphe_hide_navigation_bar"),        // TODO addBottomBarContainerHook
-//        SwitchPreference("morphe_narrow_navigation_buttons", summary = true),  // TODO PivotBarChanged/PivotBarStyle METHOD_MID
+//        SwitchPreference("morphe_hide_navigation_bar"),
+//        SwitchPreference("morphe_narrow_navigation_buttons", summary = true),
         SwitchPreference("morphe_hide_navigation_button_labels"),
         SwitchPreference("morphe_navigation_bar_animations", summary = true),
 //        SwitchPreference("morphe_disable_translucent_navigation", summary = true)
@@ -54,16 +62,11 @@ val NavigationBar = patch(
     )
 
     // Swap create with notifications button.
-    // TODO Morphe uses addOSNameHook(Endpoint.GUIDE, ...) which depends on clientContextHookPatch.
-    // setExtensionIsPatchIncluded(NavigationBarPatch::class.java)
-
-    // Alternative: scopedHook on AutoMotiveFeatureMethod.
-    ::addCreateButtonViewFingerprint.hookMethod(scopedHook(::AutoMotiveFeatureMethod.member) {
-        before { param ->
-            param.result =
-                NavigationBarPatch.swapCreateWithNotificationButton("") == "Android Automotive"
-        }
-    })
+    addOSNameHook(
+        Endpoint.GUIDE,
+        NavigationBarPatch::swapCreateWithNotificationButton
+    )
+    setExtensionIsPatchIncluded(NavigationBarPatch::class.java)
 
     // Hide navigation button labels.
     CreatePivotBarFingerprint.hookMethod(scopedHook(DexMethod("Landroid/widget/TextView;->setText(Ljava/lang/CharSequence;)V").toMethod()) {
@@ -77,7 +80,7 @@ val NavigationBar = patch(
         NavigationBarPatch.navigationTabCreated(button, view)
     }
 
-    // TODO Hide navigation bar — addBottomBarContainerHook
+    // TODO Hide navigation bar
 
     // TODO Paint over the translucent status bar and navigation bar
 
@@ -95,7 +98,7 @@ val NavigationBar = patch(
         ).forEach {
             it.hookMethod {
                 before { param ->
-                    if (NavigationBarPatch.disableAutoHidingNavigationBar()){
+                    if (NavigationBarPatch.disableAutoHidingNavigationBar()) {
                         param.result = null
                     }
                 }

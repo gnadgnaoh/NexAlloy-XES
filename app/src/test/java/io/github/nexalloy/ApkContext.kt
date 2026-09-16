@@ -63,6 +63,6 @@ class ApkContext(apkPath: String) {
             EnumSet.of(AppAttribute.VERSION_NAME),
             JadxSecurity(JadxSecurityFlag.none())
         )
-        return AppVersion(manifest.parse().versionName)
+        return AppVersion(manifest.parse().versionName.removeSuffix("-SECONDARY"))
     }
 }

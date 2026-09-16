@@ -1,5 +1,6 @@
 package io.github.nexalloy.morphe.youtube.ad
 
+import io.github.nexalloy.SkipTest
 import io.github.nexalloy.morphe.AccessFlags
 import io.github.nexalloy.morphe.Fingerprint
 import io.github.nexalloy.morphe.InstructionLocation.MatchAfterImmediately
@@ -10,10 +11,12 @@ import io.github.nexalloy.morphe.ResourceType
 import io.github.nexalloy.morphe.fieldAccess
 import io.github.nexalloy.morphe.findClassDirect
 import io.github.nexalloy.morphe.findFieldDirect
+import io.github.nexalloy.morphe.findMethodDirect
 import io.github.nexalloy.morphe.methodCall
 import io.github.nexalloy.morphe.opcode
 import io.github.nexalloy.morphe.resourceLiteral
 import io.github.nexalloy.morphe.string
+import io.github.nexalloy.morphe.youtube.shared.BuildClientContextBodyConstructorFingerprint
 
 private val ADD_METHOD_CALL = methodCall(
     opcode = Opcode.INVOKE_VIRTUAL,
@@ -22,6 +25,7 @@ private val ADD_METHOD_CALL = methodCall(
     returnType = "Z",
 )
 
+@SkipTest /*unused*/
 internal object FullScreenEngagementAdContainerFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
     returnType = "V",
@@ -89,3 +93,7 @@ internal object PlayerBytesAdLayoutFingerprint : Fingerprint(
         "Bootstrapped layout construction resulted in non PlayerBytesLayout. PlayerAds count: ",
     )
 )
+
+val BuildClientContextIsAutomotive = findMethodDirect {
+    BuildClientContextBodyConstructorFingerprint.instructionMatches[1].instruction.methodRef!!
+}

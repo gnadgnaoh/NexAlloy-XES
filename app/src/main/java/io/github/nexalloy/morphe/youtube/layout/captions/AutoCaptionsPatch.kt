@@ -27,7 +27,7 @@ val AutoCaptions = patch(
         }
     )
 
-    // TODO disableAutoCaptions — SubtitleManagerFingerprint METHOD_MID
+    // TODO disableAutoCaptions
 
     onCreateHook.add { AutoCaptionsPatch.newVideoStarted(it) }
 

@@ -17,9 +17,29 @@ import io.github.nexalloy.morphe.string
 import org.luckypray.dexkit.query.enums.StringMatchType
 import java.lang.reflect.Modifier
 
+internal const val CLIENT_INFO_CLASS =
+    $$"Lcom/google/protos/youtube/api/innertube/InnertubeContext$ClientInfo;"
+
 internal const val YOUTUBE_MAIN_ACTIVITY_CLASS_TYPE =
     "Lcom/google/android/apps/youtube/app/watchwhile/MainActivity;"
 
+
+internal object BuildClientContextBodyConstructorFingerprint : Fingerprint(
+    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.CONSTRUCTOR),
+    returnType = "V",
+    filters = listOf(
+        string("Android Wear"),
+        methodCall(
+            opcode = Opcode.INVOKE_STATIC,
+            parameters = listOf("Landroid/content/Context;"),
+            returnType = "Z"
+        ),
+        opcode(Opcode.IF_EQZ),
+        string("Android Automotive", location = MatchAfterImmediately()),
+        string("Android"),
+        fieldAccess(opcode = Opcode.IPUT_OBJECT, location = MatchAfterImmediately())
+    )
+)
 
 internal object EngagementPanelControllerFingerprint : Fingerprint(
     returnType = "L",

@@ -22,6 +22,7 @@ import app.morphe.extension.youtube.settings.preference.KeywordContentStatsPrefe
 import io.github.nexalloy.morphe.shared.misc.litho.filter.addLithoFilter
 import io.github.nexalloy.morphe.shared.misc.litho.filter.emptyComponentClass
 import io.github.nexalloy.morphe.shared.misc.litho.node.hookTreeNodeResult
+import io.github.nexalloy.morphe.shared.misc.proto.hookElement
 import io.github.nexalloy.morphe.shared.misc.settings.preference.InputType
 import io.github.nexalloy.morphe.shared.misc.settings.preference.ListPreference
 import io.github.nexalloy.morphe.shared.misc.settings.preference.NonInteractivePreference
@@ -42,6 +43,7 @@ import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_26_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_31_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_07_or_greater
+import io.github.nexalloy.morphe.youtube.misc.proto.elementProtoParserHookPatch
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.new
 import io.github.nexalloy.patch
@@ -70,6 +72,7 @@ val HideLayoutComponents = patch(
         NavigationBarHook,
         VersionCheck,
         HideHorizontalShelves,
+        elementProtoParserHookPatch,
         TreeNodeElementHook,
     )
 
@@ -259,17 +262,17 @@ val HideLayoutComponents = patch(
                         )
                     )
                 ),
-                PreferenceCategory(
-                    key = "morphe_aislist_submit_category",
-                    sorting = Sorting.UNSORTED,
-                    preferences = setOf(
-                        SwitchPreference("morphe_aislist_submit_flyout_menu", summary = true),
-                        TextPreference(
-                            key = "morphe_aislist_submit_username",
-                            inputType = InputType.TEXT
-                        )
-                    )
-                ),
+//                PreferenceCategory(
+//                    key = "morphe_aislist_submit_category",
+//                    sorting = Sorting.UNSORTED,
+//                    preferences = setOf(
+//                        SwitchPreference("morphe_aislist_submit_flyout_menu", summary = true),
+//                        TextPreference(
+//                            key = "morphe_aislist_submit_username",
+//                            inputType = InputType.TEXT
+//                        )
+//                    )
+//                ),
                 PreferenceCategory(
                     key = "morphe_hide_aislist_stats_category",
                     titleKey = "morphe_hide_stats_category_title",
@@ -452,8 +455,7 @@ val HideLayoutComponents = patch(
     // layout.album_card
 
     // hide comments carousel
-    // TODO depends on elementProtoParserHookPatch
-    // hookElement("$COMMENTS_FILTER_CLASS_NAME->onCommentsLoaded([B)[B")
+    hookElement(CommentsFilter::onCommentsLoaded)
 
     // hide comments info button
     // id.information_button
