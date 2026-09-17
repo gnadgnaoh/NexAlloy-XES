@@ -203,6 +203,13 @@ class FingerprintDsl(init: FingerprintDsl.() -> Unit) {
     }
 }
 
+/**
+ * DexKit Query is not equivalent to instruction matching. <br>
+ * This annotation forces the query results to be filtered again using instruction matching.
+ * @see Fingerprint.run
+ * */
+annotation class RestrictQuery
+
 open class Fingerprint internal constructor(
     classFingerprint: Fingerprint? = null,
     definingClass: String? = null,
@@ -222,7 +229,7 @@ open class Fingerprint internal constructor(
         if (classFingerprint != null) {
             classFinder = { classFingerprint.run().declaredClass!! }
         }
-        if(custom != null)
+        if (custom != null)
             extraMethodMatcherBlocks = listOf(custom)
     }
 
@@ -354,7 +361,7 @@ open class Fingerprint internal constructor(
     fun run(): MethodData {
         val methodMatcher = buildMethodMatcher()
 
-        val results = if (classMatcherBlock != null) {
+        var results: List<MethodData> = if (classMatcherBlock != null) {
             dexkit.findClass {
                 matcher(ClassMatcher().apply(classMatcherBlock!!))
             }.findMethod {
@@ -369,6 +376,16 @@ open class Fingerprint internal constructor(
                 matcher(methodMatcher)
             }
         }
+
+        if (results.size > 1) {
+            val isRestrict =
+                this::class.java.annotations.filterIsInstance<RestrictQuery>().firstOrNull()
+
+            if (isRestrict != null) {
+                results = results.filter { matchOrNull(it) != null }
+            }
+        }
+
         if (results.size != 1) {
             val name = this::class.simpleName ?: "Anonymous Fingerprint"
             val list = results.joinToString("\n  ") { it.descriptor }

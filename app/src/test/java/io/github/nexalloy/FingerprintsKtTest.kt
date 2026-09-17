@@ -218,8 +218,8 @@ class FingerprintsKtTest(val apkPath: Path) {
             else -> return@sequence
         }
 
-        val packageNames =
-            Files.walk(Path("src/main/java/io/github/nexalloy/morphe/$app"))
+        fun findFingerprintPackages(rootPackage:String): MutableList<String> =
+            Files.walk(Path(rootPackage))
                 .filter { Files.isRegularFile(it) && it.fileName.toString() == "Fingerprints.kt" }
                 .map {
                     // drop src/main/java, drop filename → package name
@@ -227,9 +227,12 @@ class FingerprintsKtTest(val apkPath: Path) {
                         .joinToString(".")
                 }.toList().toMutableList()
 
+        val packageNames =
+            findFingerprintPackages("src/main/java/io/github/nexalloy/morphe/$app")
+
         // Add shared fingerprints packages.
-        SharedFingerprintsProvider.getSharedFingerprints(app).forEach {
-            packageNames.add(it.substringBeforeLast('.'))
+        if (app == "youtube"  || app == "music"){
+            packageNames.addAll(findFingerprintPackages("src/main/java/io/github/nexalloy/morphe/shared"))
         }
 
         packageNames.distinct().forEach { packageName ->

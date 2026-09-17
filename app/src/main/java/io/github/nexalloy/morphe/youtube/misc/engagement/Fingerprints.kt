@@ -26,7 +26,6 @@ val panelInitFingerprint = findMethodDirect {
     panelClass().findMethod {
         matcher {
             name = "<init>"
-            paramTypes(String::class.java, null, null)
         }
     }.single()
 }
