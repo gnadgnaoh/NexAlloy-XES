@@ -3,13 +3,14 @@ package io.github.nexalloy.morphe.youtube.interaction.swipecontrols
 import io.github.nexalloy.morphe.AccessFlags
 import io.github.nexalloy.morphe.Fingerprint
 import io.github.nexalloy.morphe.Opcode
+import io.github.nexalloy.morphe.RestrictQuery
 import io.github.nexalloy.morphe.fieldAccess
 import io.github.nexalloy.morphe.findFieldDirect
 import io.github.nexalloy.morphe.literal
 import io.github.nexalloy.morphe.methodCall
 import io.github.nexalloy.morphe.opcode
 
-
+@RestrictQuery
 internal object PlayerOverlayContainerFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
     returnType = $$"Landroid/view/ViewGroup$LayoutParams;",
