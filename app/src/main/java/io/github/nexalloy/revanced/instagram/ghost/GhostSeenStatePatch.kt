@@ -6,6 +6,7 @@ import io.github.nexalloy.patch
 val GhostSeenState = patch(
     name = "Ghost seen state",
     description = "Blocks DM read receipts from being sent.",
+    use = false,
 ) {
     ::seenStateFingerprint.hookMethod {
         before { param ->
