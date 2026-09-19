@@ -9,42 +9,44 @@ internal var removePremiumUpsellStateEnabled = false
 
 internal var logPostModelHooks = false
 
-private const val CP_IS_TRANSLATABLE = 14
-private const val CP_IS_POSSIBLY_SENSITIVE = 31
-
-private const val AP_PREMIUM_UPSELL_ARGS = 38
-
 val TweetInfoHook = patch(name = "<TweetInfoHook>") {
-    CanonicalPostConstructorFingerprint.hookMethod {
-        before { param ->
+    val isTranslatable = ::canonicalPostIsTranslatableField.field
+    val isPossiblySensitive = ::canonicalPostIsPossiblySensitiveField.field
+    val premiumUpsellArgs = ::availablePostPremiumUpsellField.field
+
+    ::canonicalPostConstructorFingerprint.hookMethod {
+        after { param ->
+            val post = param.thisObject ?: return@after
+
             if (logPostModelHooks) {
                 Logger.printInfo {
                     "[Twitter] TweetInfoHook/CanonicalPost: " +
-                        "isTranslatable=${param.args[CP_IS_TRANSLATABLE]} " +
-                        "isPossiblySensitive=${param.args[CP_IS_POSSIBLY_SENSITIVE]}"
+                        "$PROP_IS_TRANSLATABLE=${isTranslatable.getBoolean(post)} " +
+                        "$PROP_IS_POSSIBLY_SENSITIVE=${isPossiblySensitive.getBoolean(post)}"
                 }
             }
-            if (!forceTranslateEnabled && !showSensitiveMediaEnabled) return@before
 
             if (forceTranslateEnabled) {
-                param.args[CP_IS_TRANSLATABLE] = true
+                isTranslatable.setBoolean(post, true)
             }
             if (showSensitiveMediaEnabled) {
-                param.args[CP_IS_POSSIBLY_SENSITIVE] = false
+                isPossiblySensitive.setBoolean(post, false)
             }
         }
     }
 
-    AvailablePostConstructorFingerprint.hookMethod {
-        before { param ->
+    ::availablePostConstructorFingerprint.hookMethod {
+        after { param ->
+            val post = param.thisObject ?: return@after
+
             if (logPostModelHooks) {
                 Logger.printInfo {
-                    "[Twitter] TweetInfoHook/AvailablePost: premiumUpsell=${param.args[AP_PREMIUM_UPSELL_ARGS]}"
+                    "[Twitter] TweetInfoHook/AvailablePost: premiumUpsell=${premiumUpsellArgs.get(post)}"
                 }
             }
-            if (!removePremiumUpsellStateEnabled) return@before
+            if (!removePremiumUpsellStateEnabled) return@after
 
-            param.args[AP_PREMIUM_UPSELL_ARGS] = null
+            premiumUpsellArgs.set(post, null)
         }
     }
 }
