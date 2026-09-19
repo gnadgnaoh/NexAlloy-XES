@@ -75,7 +75,7 @@ private inline fun <T> resolving(what: String, block: () -> T): T =
 
 val TimelineEntryHook = patch(name = "<TimelineEntryHook>") {
     val itemInterface: Class<*> = resolving("mapper row -> UrtTimelineItem") {
-        DbTimelineEntryToItemFingerprint.method.returnType
+        ::dbTimelineEntryToItemFingerprint.method.returnType
     }
 
     val entryIdGetter: Method = resolving("entryId getter on UrtTimelineItem") {
@@ -132,7 +132,7 @@ val TimelineEntryHook = patch(name = "<TimelineEntryHook>") {
         return isEntryIdRemove(entryIdGetter.invoke(item) as? String)
     }
 
-    DbTimelineEntryToItemFingerprint.hookMethod {
+    ::dbTimelineEntryToItemFingerprint.hookMethod {
         after { param ->
             val item = param.result ?: return@after
             if (shouldRemove(item)) param.result = null
