@@ -1,23 +1,61 @@
 package io.github.nexalloy.revanced.instagram.download
 
-import io.github.nexalloy.morphe.findClassDirect
 import io.github.nexalloy.morphe.findMethodListDirect
+import org.luckypray.dexkit.DexKitBridge
+import org.luckypray.dexkit.result.MethodData
 import java.lang.reflect.Modifier
 
 /**
  * DexKit lookups for the Instagram download patches.
  *
- * Every lookup here is resolved through [io.github.nexalloy.PatchExecutor], so its result is
- * cached with the rest of the module's descriptors and the search only runs again after
- * Instagram updates.
+ * Every lookup resolves through [io.github.nexalloy.PatchExecutor], so its result is cached
+ * with the rest of the module's descriptors and the search only runs again after Instagram
+ * updates.
  *
- * Most of these return a *list* rather than a single method. Two reasons: Instagram often
- * builds the same menu from more than one method (your own story and someone else's go
- * through different dispatchers), and a list comes back empty instead of throwing when a
- * build no longer has the target — several of these are genuinely optional. Where the
- * original InstaEclipse code narrowed a list by reflecting over loaded classes, that
- * filtering stays in the patch body; only the query is cached.
+ * ## Why every lookup starts with [alwaysMatches]
+ *
+ * The cache stores a list by joining the descriptors with `|`, and reads it back by rejecting
+ * a blank string. An empty list joins to the empty string, so it reads back as "nothing was
+ * ever cached for this key", and the lookup runs again. That matters here because several of
+ * these targets are genuinely absent on some Instagram builds: the carousel accessor, the
+ * author getter `Media` gained in 446, the menu allowlist. Such a lookup would miss the cache
+ * on *every* launch, and one miss is expensive, because DexKit only opens its bridge when a
+ * query actually has to run, and opening it parses the whole APK.
+ *
+ * So each lookup starts with a match that is always there. An empty result then caches as
+ * "just the anchor" rather than as nothing, and the patch drops the anchor again (see
+ * `methodsOf` in `DownloadPatches.kt`), so nothing downstream sees it.
+ *
+ * Where the original InstaEclipse code narrowed a result by reflecting over loaded classes,
+ * that filtering stays in the patch body; only the query is cached.
  */
+
+internal const val MEDIA_CLASS = "com.instagram.feed.media.Media"
+
+/**
+ * The anchor every lookup below is prefixed with: the constructors of Instagram's `Media`.
+ *
+ * `Media` is the type this whole feature is built on and the ported hooks load it by name, so
+ * if it were missing nothing here would work anyway. Constructors are used rather than
+ * methods because none of the real lookups target one, which is what lets the patch tell the
+ * anchor apart from a genuine match.
+ */
+private fun DexKitBridge.alwaysMatches(): List<MethodData> =
+    findMethod {
+        matcher {
+            declaredClass(MEDIA_CLASS)
+            name = "<init>"
+        }
+    }
+
+/**
+ * True for an entry that is the [alwaysMatches] anchor rather than a genuine match.
+ *
+ * None of the lookups here target a constructor, so a constructor of `Media` can only have
+ * come from the anchor.
+ */
+internal fun isAnchor(declaringClassName: String, isConstructor: Boolean): Boolean =
+    isConstructor && declaringClassName == MEDIA_CLASS
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Media model — shared by every entry point
@@ -30,7 +68,7 @@ import java.lang.reflect.Modifier
  * the obfuscated name of the method that returns the video-versions list.
  */
 val videoVersionGetUrlMethods = findMethodListDirect {
-    findClass {
+    alwaysMatches() + findClass {
         matcher { addInterface("com.instagram.model.mediasize.VideoVersionIntf") }
     }.flatMap { implementor ->
         findMethod {
@@ -45,24 +83,13 @@ val videoVersionGetUrlMethods = findMethodListDirect {
 }
 
 /**
- * The concrete media dictionary (`LiveTreeMediaDict` before it was obfuscated).
+ * Zero-arg getters reading the Pando `video_versions` field.
  *
- * Anchored on a Pando field name rather than the class name. The class is picked out of the
- * matches by two structural traits that survive renaming: it holds a field of its own type
- * (the Pando backing node), and it is a class rather than the interface it implements.
+ * The first one's declaring class is also how the media dictionary is identified on builds
+ * that renamed it, so there is no separate lookup for the dictionary class.
  */
-val mediaDictClass = findClassDirect {
-    findClass {
-        matcher { usingStrings("video_to_carousel_cut_info") }
-    }.first { candidate ->
-        !Modifier.isInterface(candidate.modifiers) &&
-            candidate.fields.any { it.typeName == candidate.name }
-    }
-}
-
-/** Zero-arg getters reading the Pando `video_versions` field. */
 val videoVersionsGetterMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             paramCount = 0
             usingEqStrings("video_versions")
@@ -78,7 +105,7 @@ val videoVersionsGetterMethods = findMethodListDirect {
  * accessor is anchored on the stable Pando string instead, and is absent on older builds.
  */
 val carouselMediaGetterMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             paramCount = 0
             returnType = "java.util.List"
@@ -94,7 +121,7 @@ val carouselMediaGetterMethods = findMethodListDirect {
  * located by its logging strings and the boolean getter is taken from what it invokes.
  */
 val isVideoMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             returnType = "void"
             usingStrings("asl_session_id", "is_video", "is_carousel")
@@ -103,7 +130,7 @@ val isVideoMethods = findMethodListDirect {
         wrapper.invokes.filter { invoked ->
             invoked.paramCount == 0 &&
                 invoked.returnTypeName == "boolean" &&
-                invoked.declaredClassName == "com.instagram.feed.media.Media"
+                invoked.declaredClassName == MEDIA_CLASS
         }
     }
 }
@@ -114,7 +141,7 @@ val isVideoMethods = findMethodListDirect {
 
 /** Anchor for the `User` model class, via its validation message. */
 val userClassAnchorMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher { usingStrings("username_missing_during_update") }
     }
 }
@@ -141,7 +168,7 @@ val userUsernameGetterMethods = findMethodListDirect {
         }
     }.map { it.descriptor }.toSet()
 
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             declaredClass(userClassName)
             returnType = "java.lang.String"
@@ -163,9 +190,9 @@ val mediaAuthorGetterMethods = findMethodListDirect {
         matcher { usingStrings("username_missing_during_update") }
     }.firstOrNull()?.declaredClassName ?: "com.instagram.user.model.User"
 
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
-            declaredClass("com.instagram.feed.media.Media")
+            declaredClass(MEDIA_CLASS)
             paramCount = 0
             returnType = userClassName
             usingNumbers(3599307)
@@ -181,18 +208,20 @@ val mediaAuthorGetterMethods = findMethodListDirect {
  * so the one reading the generic Pando `user` field is selected rather than the first found.
  */
 val dictUserGetterMethods = findMethodListDirect {
+    val anchor = alwaysMatches()
+
     val dictClassName = findClass {
         matcher { usingStrings("video_to_carousel_cut_info") }
     }.firstOrNull { candidate ->
         !Modifier.isInterface(candidate.modifiers) &&
             candidate.fields.any { it.typeName == candidate.name }
-    }?.name ?: return@findMethodListDirect emptyList()
+    }?.name ?: return@findMethodListDirect anchor
 
     val userClassName = findMethod {
         matcher { usingStrings("username_missing_during_update") }
     }.firstOrNull()?.declaredClassName ?: "com.instagram.user.model.User"
 
-    findMethod {
+    anchor + findMethod {
         matcher {
             declaredClass(dictClassName)
             paramCount = 0
@@ -213,7 +242,7 @@ val dictUserGetterMethods = findMethodListDirect {
  * picks the options-builder out of their declaring classes by its parameter shape.
  */
 val reelOptionsControllerMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher { usingStrings("ClipsOrganicMediaItemViewMoreOptionsController") }
     }
 }
@@ -227,7 +256,7 @@ val reelOptionsControllerMethods = findMethodListDirect {
  */
 val reelOptionsListBuilderMethods = findMethodListDirect {
     val option = "Lcom/instagram/feed/media/mediaoption/MediaOption\$Option;"
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             returnType = "java.util.ArrayList"
             addUsingField("$option->PLAYBACK_CONTROLS:$option")
@@ -245,9 +274,9 @@ val reelOptionsListBuilderMethods = findMethodListDirect {
  * param id, which is a hardcoded literal.
  */
 val reelDownloadEligibleGateMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
-            paramTypes("com.instagram.common.session.UserSession", "com.instagram.feed.media.Media")
+            paramTypes("com.instagram.common.session.UserSession", MEDIA_CLASS)
             returnType = "boolean"
             usingNumbers(36313978552585585L)
         }
@@ -256,7 +285,7 @@ val reelDownloadEligibleGateMethods = findMethodListDirect {
 
 /** The "is the viewer restricted from downloading" gate. See [reelDownloadEligibleGateMethods]. */
 val reelDownloadRestrictedGateMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             paramTypes("com.instagram.common.session.UserSession", "boolean")
             returnType = "boolean"
@@ -277,11 +306,13 @@ val reelDownloadRestrictedGateMethods = findMethodListDirect {
  * for the parameters it must take (the option enum and the list to add to).
  */
 val postMenuCreatorVoidMethods = findMethodListDirect {
+    val anchor = alwaysMatches()
+
     val creator = findClass {
         matcher { usingStrings("MediaOptionsOverflowMenuCreator") }
-    }.firstOrNull()?.name ?: return@findMethodListDirect emptyList()
+    }.firstOrNull()?.name ?: return@findMethodListDirect anchor
 
-    findMethod {
+    anchor + findMethod {
         matcher {
             declaredClass(creator)
             returnType = "void"
@@ -296,7 +327,7 @@ val postMenuCreatorVoidMethods = findMethodListDirect {
  * for telemetry, so the patch narrows this further before hooking.
  */
 val postOptionClickMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             returnType = "void"
             paramTypes("com.instagram.feed.media.mediaoption.MediaOption\$Option")
@@ -312,7 +343,7 @@ val postOptionClickMethods = findMethodListDirect {
  */
 val postMenuAllowlistMethods = findMethodListDirect {
     val option = "Lcom/instagram/feed/media/mediaoption/MediaOption\$Option;"
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             paramTypes("boolean")
             returnType = "java.util.List"
@@ -336,7 +367,7 @@ val postMenuAllowlistMethods = findMethodListDirect {
  * stories. Anchored on a debug string that has stayed stable across versions.
  */
 val storyOptionBuilderMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher { usingStrings("[INTERNAL] Pause Playback") }
     }
 }
@@ -350,7 +381,7 @@ val storyOptionBuilderMethods = findMethodListDirect {
  * harmless.
  */
 val storyOptionClickMethods = findMethodListDirect {
-    findMethod {
+    alwaysMatches() + findMethod {
         matcher {
             returnType = "void"
             usingStrings("[INTERNAL] Pause Playback")

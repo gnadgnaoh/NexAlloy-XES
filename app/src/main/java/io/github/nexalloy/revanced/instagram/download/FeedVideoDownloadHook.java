@@ -148,50 +148,15 @@ public class FeedVideoDownloadHook {
             videoVersionGetUrl = videoVersionIntfClass.getMethod("getUrl");
         } catch (Throwable ignored) {}
 
-        // Resolve the old interface and modern concrete model independently. In recent
-        // Instagram builds MutableMediaDictIntf may be absent; nesting the LiveTree lookup
-        // under it made Reel downloads fall through to the JPG cover (issue #204).
-        mediaModel = MediaModelResolver.resolve(classLoader);
-        mutableMediaDictIntfClass = mediaModel.mutableDictClass;
-        liveTreeMediaDictClass = mediaModel.liveTreeDictClass;
-        carouselCandidates.clear();
-        carouselCandidates.addAll(mediaModel.listCandidates);
-        ModuleLog.line("(NA|DL) media model: mutable="
-                + (mutableMediaDictIntfClass != null) + " liveTree="
-                + (liveTreeMediaDictClass != null) + " listCandidates="
-                + carouselCandidates.size());
-
-        installUriCaptureHook();
+        // The model itself is bound by the patch right after this, through
+        // bindMediaModel, which can also pass the dictionary class it found.
     }
 
-    // ── Hook 1: Uri.parse (fallback buffer) ──────────────────────────────────
-
-    private void installUriCaptureHook() {
-        try {
-            XposedHelpers.findAndHookMethod(Uri.class, "parse", String.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            try {
-                                if (!FeatureFlags.enablePostDownload) return;
-                                if (param.args.length == 0 || !(param.args[0] instanceof String s)) return;
-                                if (!isCdnMediaUrl(s)) return;
-                                synchronized (urlBuffer) {
-                                    if (!urlBuffer.isEmpty() && urlBuffer.peekFirst().url.equals(s))
-                                        return;
-                                    urlBuffer.addFirst(new UrlEntry(s));
-                                    while (urlBuffer.size() > MAX_URLS) urlBuffer.removeLast();
-                                }
-                            } catch (Throwable ignored) {
-                                // Uri.parse runs app-wide; never let our buffer logic crash a caller.
-                            }
-                        }
-                    });
-            FeatureStatusTracker.setHooked("PostDownload");
-        } catch (Throwable t) {
-            ModuleLog.line("(NexAlloy | MediaDownload): ❌ Uri.parse hook: " + t);
-        }
-    }
+    // Hook 1 in InstaEclipse captured every string passed to Uri.parse into urlBuffer, as a
+    // last-resort source of CDN URLs for the floating download button. That button was
+    // superseded by the context-menu entry, so nothing reads urlBuffer any more — and hooking
+    // Uri.parse made the whole app pay for it, since Instagram parses URIs constantly. The
+    // buffer that is still used is videoUrlBuffer, filled from getUrl() and the media model.
 
     // ── Hook 2: View.onAttachedToWindow ──────────────────────────────────────
 

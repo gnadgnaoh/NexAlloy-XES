@@ -36,8 +36,11 @@ public class ProfilePicDownloadHook {
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final String  HOOKED_TAG  = "ie_profile_dl";
 
-    /** Cached resource ID for "expanded_profile_pic"; 0 = not yet resolved. */
+    /** Cached resource ID for "expanded_profile_pic"; 0 = not resolved yet. */
     private static volatile int expandedPicViewId = 0;
+
+    /** Set once the lookup below has run, so a missing id is not looked up on every attach. */
+    private static volatile boolean expandedPicViewIdResolved = false;
 
     // ── Install ───────────────────────────────────────────────────────────────
 
@@ -58,20 +61,46 @@ public class ProfilePicDownloadHook {
                 int vid = v.getId();
                 if (vid == View.NO_ID) return;
 
-                // Fast path: cached int comparison (only resolves resource name once)
-                if (expandedPicViewId != 0) {
-                    if (vid != expandedPicViewId) return;
-                } else {
-                    try {
-                        String name = v.getResources().getResourceEntryName(vid);
-                        if (!"expanded_profile_pic".equals(name)) return;
-                        expandedPicViewId = vid;
-                    } catch (Throwable ignored) { return; }
+                // This fires for every view the app attaches, so the body has to stay down to
+                // an int comparison. Looking the id up by name once, on the first attach,
+                // keeps it that way; asking the resource table for each view's entry name
+                // instead would cost a lookup per attached view for the whole session.
+                int wanted = expandedPicViewId;
+                if (wanted == 0) {
+                    wanted = resolveExpandedPicViewId(v);
+                    if (wanted == 0) return;
                 }
+                if (vid != wanted) return;
 
                 injectLongPress(v);
             }
         });
+    }
+
+    /**
+     * Looks up the id of the expanded profile picture view, once per process.
+     *
+     * Returns 0 when the name is not in this build's resources, and remembers that, so the
+     * hook falls straight through on every later attach instead of retrying the lookup.
+     */
+    @SuppressLint("DiscouragedApi")
+    private static int resolveExpandedPicViewId(View view) {
+        if (expandedPicViewIdResolved) return expandedPicViewId;
+        synchronized (ProfilePicDownloadHook.class) {
+            if (expandedPicViewIdResolved) return expandedPicViewId;
+            int id = 0;
+            try {
+                Context ctx = view.getContext();
+                id = ctx.getResources().getIdentifier(
+                        "expanded_profile_pic", "id", ctx.getPackageName());
+            } catch (Throwable ignored) {}
+            expandedPicViewId = id;
+            expandedPicViewIdResolved = true;
+            if (id == 0) {
+                ModuleLog.line("(NA|ProfileDL) expanded_profile_pic id not present in this build");
+            }
+            return id;
+        }
     }
 
     // ── UI injection ──────────────────────────────────────────────────────────

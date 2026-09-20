@@ -27,9 +27,16 @@ import kotlin.reflect.KProperty0
  * narrowing happens here.
  */
 
-/** Resolves a fingerprint's matches to [Method]s, skipping any that no longer load. */
+/**
+ * Resolves a fingerprint's real matches to [Method]s.
+ *
+ * Drops the anchor every lookup is prefixed with (see `Fingerprints.kt`, which explains why
+ * it is there), and skips any match that no longer loads.
+ */
 private fun PatchExecutor.methodsOf(fingerprint: KProperty0<FindMethodListFunc>): List<Method> =
-    fingerprint.dexMethodList.mapNotNull { runCatching { it.toMethod() }.getOrNull() }
+    fingerprint.dexMethodList
+        .filterNot { isAnchor(it.declaredClassName, it.isConstructor) }
+        .mapNotNull { runCatching { it.toMethod() }.getOrNull() }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Shared engine
@@ -44,13 +51,10 @@ private fun PatchExecutor.methodsOf(fingerprint: KProperty0<FindMethodListFunc>)
 val MediaDownloadCore = patch {
     FeedVideoDownloadHook().install(classLoader)
 
-    // The dictionary holding the media payload. Absent on builds that folded it into Media,
-    // where the resolver falls back to the legacy interfaces or to the getters below.
-    val dictClass = runCatching { ::mediaDictClass.clazz }
-        .onFailure { Logger.printDebug { "MediaDownloadCore: media dict not found, using fallbacks" } }
-        .getOrNull()
-    FeedVideoDownloadHook.bindMediaModel(dictClass, classLoader)
-
+    // The dictionary holding the media payload is resolved by name where the build still has
+    // it. On builds that renamed or folded it into Media, bindVideoVersionsGetters picks it up
+    // from the declaring class of the video_versions getter instead.
+    FeedVideoDownloadHook.bindMediaModel(null, classLoader)
     FeedVideoDownloadHook.bindVideoVersionsGetters(methodsOf(::videoVersionsGetterMethods), classLoader)
     FeedVideoDownloadHook.bindCarouselGetter(methodsOf(::carouselMediaGetterMethods))
     FeedVideoDownloadHook.bindIsVideoMethod(methodsOf(::isVideoMethods).firstOrNull())
@@ -63,7 +67,7 @@ val MediaDownloadCore = patch {
     FeedVideoDownloadHook.bindMediaAuthorGetter(methodsOf(::mediaAuthorGetterMethods).firstOrNull())
     FeedVideoDownloadHook.bindDictUserGetter(methodsOf(::dictUserGetterMethods))
 
-    ::videoVersionGetUrlMethods.dexMethodList.forEach { getUrl ->
+    methodsOf(::videoVersionGetUrlMethods).forEach { getUrl ->
         getUrl.hookMethod { after { FeedVideoDownloadHook.onVideoUrlReturned(it) } }
     }
 }
