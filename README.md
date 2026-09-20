@@ -53,6 +53,6 @@ or [Create an issue](https://github.com/gnadgnaoh/SexAlloy/issues/new/choose)
 
 ## ❤️ Special Thanks
 
-- **[trnthanhhuy](https://t.me/trnthanhhuy)**: for sponsoring and supporting the project from day one.
+- **[Nguyen Trong Hieu](https://t.me/trangkyanh17)**: for sponsoring and supporting the project from day one.
 - **Allen Chang**: for testing and reporting issues to improve the Facebook patch code.
 - **[FiorenMas](https://github.com/FiorenMas/)**: for bring SexAlloy to non-root devices.
