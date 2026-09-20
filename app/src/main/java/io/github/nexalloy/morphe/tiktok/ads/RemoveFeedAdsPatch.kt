@@ -33,7 +33,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
 
     // region For You
 
-    val feedApis = ::feedApiFetchFeedListFingerprints.dexMethodList
+    val feedApis = ::feedApiFetchFeedListFingerprints.dexMethodList.realMatches()
     check(feedApis.isNotEmpty()) { "IFeedApi.fetchFeedList implementation not found" }
     feedApis.forEach {
         it.hookMethod {
@@ -46,13 +46,18 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         val filterPayload: IHookCallback = { param ->
             filterSingleListField(param.args.firstOrNull(), "insertItemList")
         }
-        runCatching { FeedInsertItemListFingerprint.hookMethod { before(filterPayload) } }
-            .getOrElse { FeedInsertItemListByStructureFingerprint.hookMethod { before(filterPayload) } }
+        val inserts = ::feedInsertItemListFingerprints.dexMethodList.realMatches()
+        check(inserts.isNotEmpty()) { "insertItemList not found" }
+        inserts.forEach { it.hookMethod { before(filterPayload) } }
     }
 
     optional("coldStartCache") {
-        ColdStartFeedCacheFingerprint.hookMethod {
-            after { param -> filterFeedItemList(param.result, "coldStartCache") }
+        val coldStart = ::coldStartFeedCacheFingerprints.dexMethodList.realMatches()
+        check(coldStart.isNotEmpty()) { "cold-start FeedItemList getter not found" }
+        coldStart.forEach {
+            it.hookMethod {
+                after { param -> filterFeedItemList(param.result, "coldStartCache") }
+            }
         }
     }
 
@@ -61,7 +66,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
     // region Profile
 
     optional("videoGrids") {
-        val filters = ::videoGridAdListFilterFingerprints.dexMethodList
+        val filters = ::videoGridAdListFilterFingerprints.dexMethodList.realMatches()
         if (filters.isNotEmpty()) {
             filters.forEach {
                 it.hookMethod {
@@ -74,7 +79,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
                 }
             }
         } else {
-            val callbacks = ::profileResultCallbackFingerprints.dexMethodList
+            val callbacks = ::profileResultCallbackFingerprints.dexMethodList.realMatches()
             check(callbacks.isNotEmpty()) { "no grid list filter and no result callback found" }
             callbacks.forEach {
                 it.hookMethod {
@@ -88,7 +93,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
     }
 
     optional("talentProfileAds") {
-        val callbacks = ::talentProfileAdsCallbackFingerprints.dexMethodList
+        val callbacks = ::talentProfileAdsCallbackFingerprints.dexMethodList.realMatches()
         check(callbacks.isNotEmpty()) { "ProfileTalentShareAdResult reader not found" }
         callbacks.forEach {
             it.hookMethod {
@@ -107,7 +112,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         if (byName.isNotEmpty()) {
             byName.forEach { it.hookMethod { before(filterEvent) } }
         } else {
-            val found = ::talentProfileAdEventSubscriberFingerprints.dexMethodList
+            val found = ::talentProfileAdEventSubscriberFingerprints.dexMethodList.realMatches()
             check(found.isNotEmpty()) { "onTalentProfileAdEvent not found" }
             found.forEach { it.hookMethod { before(filterEvent) } }
         }
