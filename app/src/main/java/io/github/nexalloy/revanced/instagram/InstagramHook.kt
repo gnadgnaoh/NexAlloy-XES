@@ -18,6 +18,15 @@ import io.github.nexalloy.revanced.instagram.ghost.GhostViewLiveAnonymously
 // import io.github.nexalloy.revanced.instagram.ghost.markasread.GhostChannelMarkAsRead
 // import io.github.nexalloy.revanced.instagram.ghost.markasread.GhostDMMarkAsRead
 import io.github.nexalloy.revanced.instagram.dm.SaveDeletedMessages
+import io.github.nexalloy.revanced.instagram.download.CopyMediaLink
+import io.github.nexalloy.revanced.instagram.download.DownloadIntoUsernameFolders
+import io.github.nexalloy.revanced.instagram.download.PostDownload
+import io.github.nexalloy.revanced.instagram.download.ProfilePictureDownload
+import io.github.nexalloy.revanced.instagram.download.ReelDownload
+import io.github.nexalloy.revanced.instagram.download.SaveInstants
+import io.github.nexalloy.revanced.instagram.download.StoryDownload
+import io.github.nexalloy.revanced.instagram.download.TimestampDownloadedFilenames
+import io.github.nexalloy.revanced.instagram.download.UploadInstants
 
 val InstagramPatches = arrayOf(
     HideAds,
@@ -41,4 +50,14 @@ val InstagramPatches = arrayOf(
     // GhostDMMarkAsRead,            // manual read receipt for DMs
     // ── Direct Messages ───────────────────────────────────────
     SaveDeletedMessages,          // anti-revoke: keeps unsent messages in the thread
+    // ── Media download ────────────────────────────────────────
+    ReelDownload,                 // Download entry in the reel overflow menu
+    PostDownload,                 // Download entry in a post's three-dots menu
+    StoryDownload,                // download button in the story viewer
+    ProfilePictureDownload,       // full-resolution avatar
+    SaveInstants,                 // long-press a received instant to save it
+    UploadInstants,               // send a gallery picture as an instant
+    CopyMediaLink,                // Copy link entry beside Download
+    DownloadIntoUsernameFolders,  // one sub-folder per account
+    TimestampDownloadedFilenames, // keeps both copies when saving a post twice
 )
