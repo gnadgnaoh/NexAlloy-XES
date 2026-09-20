@@ -82,7 +82,11 @@ class InstantUploadHook {
                         if (FeatureFlags.uploadInstants && pending != null) {
                             p.args[1] = pending
                             if (p.args[2] != null) {
-                                p.args[2] = pending.copy(pending.config, false)
+                                // Bitmap.getConfig() is @Nullable in the SDK. Java passed it
+                                // straight to copy(), which NPEs on null; decode() always asks
+                                // for a software allocator, so ARGB_8888 is the right fallback.
+                                val config = pending.config ?: Bitmap.Config.ARGB_8888
+                                p.args[2] = pending.copy(config, false)
                             }
                             pendingBitmap = null
                             FeedVideoDownloadHook.mainHandler.post { removeChip() }
