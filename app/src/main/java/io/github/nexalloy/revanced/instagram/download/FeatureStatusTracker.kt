@@ -15,7 +15,7 @@ object FeatureStatusTracker {
         Collections.synchronizedMap(LinkedHashMap())
 
     fun setHooked(feature: String) {
-        if (HOOKED.put(feature, java.lang.Boolean.TRUE) == null) {
+        if (HOOKED.put(feature, true) == null) {
             ModuleLog.line("(NA|DL) hooked: $feature")
         }
     }
