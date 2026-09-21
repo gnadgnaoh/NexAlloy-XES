@@ -63,9 +63,8 @@ object CallRecordingOutput {
     fun newPendingName(startedAt: Long, direction: String?): String {
         val safeDirection = safeDirection(direction)
         val nonce = UUID.randomUUID().toString().replace("-", "").substring(0, 8)
-        return String.format(
-            Locale.US, "zalo-call-%013d-%s-%s.part",
-            maxOf(0L, startedAt), safeDirection, nonce
+        return "zalo-call-%013d-%s-%s.part".format(
+            Locale.US, maxOf(0L, startedAt), safeDirection, nonce
         )
     }
 
