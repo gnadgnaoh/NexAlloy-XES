@@ -1,6 +1,6 @@
 [versions]
 agp = "9.2.1"
-dexkit = "2.2.0"
+dexkit = "2.3.0"
 xposed = "82"
 libxposed = "102.0.0"
 annotation = "1.10.0"
