@@ -4,6 +4,7 @@ import io.github.nexalloy.FindClassFunc
 import io.github.nexalloy.FindFieldFunc
 import io.github.nexalloy.FindMethodFunc
 import io.github.nexalloy.FindMethodListFunc
+import org.luckypray.dexkit.DexAccessFlags
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.matchers.ClassMatcher
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -21,25 +22,26 @@ fun getTypeNameCompat(it: String): String? {
 }
 
 enum class AccessFlags(val modifier: Int) {
-    PUBLIC(0x1),
-    PRIVATE(0x2),
-    PROTECTED(0x4),
-    STATIC(0x8),
-    FINAL(0x10),
-    SYNCHRONIZED(0x20),
-    VOLATILE(0x40),
-    BRIDGE(0x40),
-    TRANSIENT(0x80),
-    VARARGS(0x80),
-    NATIVE(0x100),
-    INTERFACE(0x200),
-    ABSTRACT(0x400),
-    STRICTFP(0x800),
-    SYNTHETIC(0x1000),
-    ANNOTATION(0x2000),
-    ENUM(0x4000),
-    CONSTRUCTOR(0x10000),
-    DECLARED_SYNCHRONIZED(0x20000);
+    PUBLIC(DexAccessFlags.PUBLIC),
+    PRIVATE(DexAccessFlags.PRIVATE),
+    PROTECTED(DexAccessFlags.PROTECTED),
+    STATIC(DexAccessFlags.STATIC),
+    FINAL(DexAccessFlags.FINAL),
+    SYNCHRONIZED(DexAccessFlags.SYNCHRONIZED),
+    SUPER(DexAccessFlags.SUPER),
+    VOLATILE(DexAccessFlags.VOLATILE),
+    BRIDGE(DexAccessFlags.BRIDGE),
+    TRANSIENT(DexAccessFlags.TRANSIENT),
+    VARARGS(DexAccessFlags.VARARGS),
+    NATIVE(DexAccessFlags.NATIVE),
+    INTERFACE(DexAccessFlags.INTERFACE),
+    ABSTRACT(DexAccessFlags.ABSTRACT),
+    STRICTFP(DexAccessFlags.STRICT),
+    SYNTHETIC(DexAccessFlags.SYNTHETIC),
+    ANNOTATION(DexAccessFlags.ANNOTATION),
+    ENUM(DexAccessFlags.ENUM),
+    CONSTRUCTOR(DexAccessFlags.CONSTRUCTOR),
+    DECLARED_SYNCHRONIZED(DexAccessFlags.DECLARED_SYNCHRONIZED),
 }
 
 fun MethodMatcher.strings(vararg strings: String) = this.usingStrings(strings.toList())
@@ -58,7 +60,7 @@ fun MethodMatcher.opcodes(opcodes: Collection<Opcode>): OpCodesMatcher {
 
 fun MethodMatcher.accessFlags(vararg accessFlags: AccessFlags) {
     val modifiers = accessFlags.map { it.modifier }.reduce { acc, next -> acc or next }
-    if (modifiers != 0) this.modifiers(modifiers)
+    if (modifiers != 0) this.accessFlags(modifiers)
     if (accessFlags.contains(AccessFlags.CONSTRUCTOR)) {
         if (accessFlags.contains(AccessFlags.STATIC)) this.name = "<clinit>"
         else this.name = "<init>"
