@@ -19,6 +19,9 @@ import org.json.JSONObject
 import java.lang.reflect.Field
 import java.lang.reflect.Member
 import java.lang.reflect.Method
+import java.lang.reflect.Modifier
+import java.net.URLDecoder
+import java.net.URLEncoder
 import java.util.ArrayDeque
 import java.util.Collections
 import java.util.IdentityHashMap
@@ -3004,4 +3007,507 @@ fun hookVideoViewerExtensionGate(method: Method) {
             param.result = false
         }
     }
+}
+
+// ─── Upstream FacebookAppAdsRemover hook actions ─────────────────────────────
+//
+// Used by SpoofAdFreeSession, HideReelsShopping and AggressiveAdBlocking. Nothing here names
+// an obfuscated class or member; every target comes from a DexKit fingerprint and the
+// installers only look at method shape.
+
+private val upstreamMethodsHooked = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+private fun markHooked(method: Method): Boolean = upstreamMethodsHooked.add(methodHookKey(method))
+
+// ─── Safety filters (upstream AdFilterHook) ──────────────────────────────────
+
+/**
+ * R8 centralises string constants into dispatch tables — `static String m(int)` with a giant
+ * switch. An anchor string then resolves to the TABLE rather than to the real method, and
+ * nulling its return corrupts every caller. Never hook one.
+ */
+fun isStringDispatchTable(m: Method): Boolean =
+    Modifier.isStatic(m.modifiers) && m.returnType == String::class.java &&
+        m.parameterCount == 1 && m.parameterTypes[0] == Int::class.javaPrimitiveType
+
+/**
+ * The native library loader must never be swept. SoLoader's merged-library table NAMES every
+ * native library, ad ones included, so a string anchor can land on it; replacing its
+ * boolean `loadLibrary` made Facebook unable to start at all (upstream incident, 578).
+ */
+private val LOADER_INFRA_PREFIXES = listOf("com.facebook.soloader.")
+private val LOADER_INFRA_METHODS = setOf("loadLibrary", "loadLibraryUnsafe")
+
+fun isLoaderInfra(className: String): Boolean = LOADER_INFRA_PREFIXES.any { className.startsWith(it) }
+
+private fun isUnsafeTarget(m: Method): Boolean =
+    isStringDispatchTable(m) || isLoaderInfra(m.declaringClass.name) || m.name in LOADER_INFRA_METHODS ||
+        Modifier.isAbstract(m.modifiers)
+
+/** Returning null from a primitive-returning method crashes; substitute defaults. */
+private fun nullResultFor(returnType: Class<*>): Any? = when (returnType) {
+    java.lang.Boolean.TYPE -> false
+    java.lang.Integer.TYPE -> 0
+    java.lang.Long.TYPE -> 0L
+    java.lang.Double.TYPE -> 0.0
+    java.lang.Float.TYPE -> 0f
+    java.lang.Short.TYPE -> 0.toShort()
+    java.lang.Byte.TYPE -> 0.toByte()
+    java.lang.Character.TYPE -> ' '
+    else -> null
+}
+
+// ─── Hook actions (upstream HookAction) ──────────────────────────────────────
+
+/** BLOCK_NULL — skip the original, return null or a primitive-safe default. */
+fun hookBlockNull(method: Method): Boolean {
+    if (isUnsafeTarget(method) || !markHooked(method)) return false
+    method.isAccessible = true
+    val result = nullResultFor(method.returnType)
+    method.hookMethod { before { param -> param.result = result } }
+    return true
+}
+
+/** BLOCK_FALSE — skip the original, return false. Only for boolean methods. */
+fun hookBlockFalse(method: Method): Boolean {
+    if (method.returnType != java.lang.Boolean.TYPE && method.returnType != java.lang.Boolean::class.java) return false
+    if (isUnsafeTarget(method) || !markHooked(method)) return false
+    method.isAccessible = true
+    method.hookMethod { before { param -> param.result = false } }
+    return true
+}
+
+/** Forces a boolean getter to TRUE (ad-free session spoof). */
+fun hookForceTrue(method: Method): Boolean {
+    if (method.returnType != java.lang.Boolean.TYPE) return false
+    if (!markHooked(method)) return false
+    method.isAccessible = true
+    method.hookMethod { before { param -> param.result = true } }
+    return true
+}
+
+// ─── Banner sweep (upstream AdFilterHook.installBannerScan) ──────────────────
+
+/**
+ * BLOCK_FALSE for one boolean method of a banner-ad class. Mirrors upstream's guards: never
+ * `equals` (breaks HashMap lookups app-wide), never synthetic/bridge, never the loader.
+ */
+fun hookBannerBoolean(method: Method): Boolean {
+    if (method.returnType != java.lang.Boolean.TYPE || method.parameterCount < 1) return false
+    if (method.name == "equals" && method.parameterCount == 1) return false
+    if (method.isSynthetic || method.isBridge) return false
+    return hookBlockFalse(method)
+}
+
+/** SPONSORED_NULL — null the call only when the receiver or an argument is a sponsored story. */
+fun hookSponsoredNull(method: Method): Boolean {
+    if (isUnsafeTarget(method) || !markHooked(method)) return false
+    method.isAccessible = true
+    val result = nullResultFor(method.returnType)
+    method.hookMethod {
+        before { param ->
+            val sponsored = SponsoredDataCheck.isSponsored(param.thisObject) ||
+                param.args.any { SponsoredDataCheck.isSponsored(it) }
+            if (sponsored) param.result = result
+        }
+    }
+    return true
+}
+
+/**
+ * RECEIVER_SPONSORED_NULL — null only when the receiver's own toString says "SPONSORED".
+ * Used on the Shorts mid-card unit's type-node getter, a bare TreeJNI wrapper whose
+ * toString is a dump of the unit.
+ */
+fun hookReceiverSponsoredNull(method: Method): Boolean {
+    if (isUnsafeTarget(method) || !markHooked(method)) return false
+    method.isAccessible = true
+    val result = nullResultFor(method.returnType)
+    method.hookMethod {
+        before { param ->
+            val sponsored = runCatching { param.thisObject?.toString()?.contains("SPONSORED") == true }
+                .getOrDefault(false)
+            if (sponsored) param.result = result
+        }
+    }
+    return true
+}
+
+// ─── Sponsored-data check (upstream AdFilterHook.SponsoredCheck) ─────────────
+
+/**
+ * True when an object is — or directly wraps — a TreeJNI story whose `sponsored_data` field
+ * is set. Uses `hasFieldValue(FIELD_NAME_HASH_CODE_sponsored_data)`: the hash constant is
+ * read off `GraphQLPartialStory` (a real, unobfuscated class) rather than pinned, and
+ * `hasFieldValue` is TreeJNI's own public API, so no obfuscated getter is involved.
+ */
+object SponsoredDataCheck {
+    private const val PARTIAL_STORY = "com.facebook.graphql.model.GraphQLPartialStory"
+
+    @Volatile private var classLoader: ClassLoader? = null
+    @Volatile private var resolved = false
+    @Volatile private var hash: Int? = null
+    private val hasFieldValueCache = ConcurrentHashMap<Class<*>, java.util.Optional<Method>>()
+    private val fieldCache = ConcurrentHashMap<Class<*>, List<Field>>()
+
+    fun init(loader: ClassLoader) { classLoader = loader }
+
+    private fun sponsoredHash(): Int? {
+        if (resolved) return hash
+        resolved = true
+        hash = runCatching {
+            val c = Class.forName(PARTIAL_STORY, false, classLoader)
+            val f = c.getDeclaredField("FIELD_NAME_HASH_CODE_sponsored_data")
+            f.isAccessible = true
+            f.get(null) as Int
+        }.getOrNull()
+        return hash
+    }
+
+    fun isSponsored(obj: Any?): Boolean {
+        if (obj == null || isSkippable(obj)) return false
+        if (isSponsoredTree(obj)) return true
+        // Wrapper types (FeedProps and friends): test every object field one level deep.
+        return runCatching {
+            fieldsFor(obj.javaClass).any { f ->
+                val v = runCatching { f.get(obj) }.getOrNull() ?: return@any false
+                v !== obj && !isSkippable(v) && isSponsoredTree(v)
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun fieldsFor(type: Class<*>): List<Field> = fieldCache.getOrPut(type) {
+        val list = ArrayList<Field>()
+        var c: Class<*>? = type
+        while (c != null && c != Any::class.java) {
+            c.declaredFields.forEach { f ->
+                if (f.isSynthetic || Modifier.isStatic(f.modifiers)) return@forEach
+                val t = f.type
+                if (t.isPrimitive || t == String::class.java || t.isArray) return@forEach
+                f.isAccessible = true
+                list.add(f)
+            }
+            c = c.superclass
+        }
+        list
+    }
+
+    private fun isSponsoredTree(obj: Any): Boolean {
+        val h = sponsoredHash() ?: return false
+        val m = hasFieldValueOf(obj.javaClass) ?: return false
+        return runCatching { m.invoke(obj, h) as Boolean }.getOrDefault(false)
+    }
+
+    private fun hasFieldValueOf(type: Class<*>): Method? {
+        hasFieldValueCache[type]?.let { return it.orElse(null) }
+        var c: Class<*>? = type
+        var found: Method? = null
+        while (c != null && found == null) {
+            found = runCatching {
+                c!!.getDeclaredMethod("hasFieldValue", Int::class.javaPrimitiveType).apply { isAccessible = true }
+            }.getOrNull()
+            c = c.superclass
+        }
+        hasFieldValueCache[type] = java.util.Optional.ofNullable(found)
+        return found
+    }
+
+    private fun isSkippable(obj: Any): Boolean {
+        val n = obj.javaClass.name
+        return n.startsWith("java.") || n.startsWith("android.") || n.startsWith("kotlin.")
+    }
+}
+
+// ─── Newsfeed processNewStories filter (upstream NewsfeedFilterHook) ─────────
+
+/**
+ * Hooks the `processNewStories` Runnable's `run()` (found by its "Added stories to FUC"
+ * literal) and drops every new-story edge whose GraphQLFeedStoryCategory is SPONSORED
+ * before `run()` sees the collection — the classic feed pipeline's own entry point.
+ *
+ * Only the SPONSORED category is ported: upstream's other categories (Threads, Reels,
+ * suggestions…) are content filters, not ads, and are off by default there.
+ *
+ * All members are located by shape: the holder field is the one whose value declares an
+ * ImmutableCollection field, and the category getter is the edge's 0-arg method returning
+ * an enum that carries SPONSORED/PROMOTION constants.
+ */
+private val holderFieldCache = ConcurrentHashMap<Class<*>, java.util.Optional<Field>>()
+private val collectionFieldCache = ConcurrentHashMap<Class<*>, java.util.Optional<Field>>()
+private val edgeCategoryGetterCache = ConcurrentHashMap<Class<*>, java.util.Optional<Method>>()
+
+fun hookNewsfeedSponsoredFilter(runMethod: Method, classLoader: ClassLoader): Boolean {
+    if (runMethod.parameterCount != 0 || !markHooked(runMethod)) return false
+    val collectionType = runCatching {
+        Class.forName("com.google.common.collect.ImmutableCollection", false, classLoader)
+    }.getOrNull() ?: return false
+    val copyOf = runCatching {
+        Class.forName("com.google.common.collect.ImmutableList", false, classLoader)
+            .getDeclaredMethod("copyOf", Iterable::class.java).apply { isAccessible = true }
+    }.getOrNull() ?: return false
+    runMethod.isAccessible = true
+    runMethod.hookMethod {
+        before { param ->
+            runCatching { filterNewStories(param.thisObject ?: return@before, collectionType, copyOf) }
+        }
+    }
+    return true
+}
+
+private fun filterNewStories(runnable: Any, collectionType: Class<*>, copyOf: Method) {
+    val holderField = holderFieldCache.getOrPut(runnable.javaClass) {
+        java.util.Optional.ofNullable(findHolderField(runnable, collectionType))
+    }.orElse(null) ?: return
+    val holder = holderField.get(runnable) ?: return
+    val collectionField = collectionFieldFor(holder.javaClass, collectionType) ?: return
+    val elements = (collectionField.get(holder) as? Iterable<*>)?.toList() ?: return
+    if (elements.isEmpty()) return
+    val kept = ArrayList<Any>(elements.size)
+    var removed = 0
+    for (e in elements) {
+        if (e == null) continue
+        if (edgeCategoryOf(e) == "SPONSORED") removed++ else kept.add(e)
+    }
+    if (removed == 0) return
+    val copy = copyOf.invoke(null, kept as Iterable<*>) ?: return
+    collectionField.set(holder, copy)
+}
+
+private fun findHolderField(runnable: Any, collectionType: Class<*>): Field? {
+    var c: Class<*>? = runnable.javaClass
+    while (c != null) {
+        for (f in c.declaredFields) {
+            if (Modifier.isStatic(f.modifiers)) continue
+            f.isAccessible = true
+            val v = runCatching { f.get(runnable) }.getOrNull() ?: continue
+            if (collectionFieldFor(v.javaClass, collectionType) != null) return f
+        }
+        c = c.superclass
+    }
+    return null
+}
+
+private fun collectionFieldFor(type: Class<*>, collectionType: Class<*>): Field? =
+    collectionFieldCache.getOrPut(type) {
+        var c: Class<*>? = type
+        var result: Field? = null
+        while (c != null && result == null) {
+            result = c.declaredFields.firstOrNull {
+                !Modifier.isStatic(it.modifiers) && collectionType.isAssignableFrom(it.type)
+            }
+            c = c.superclass
+        }
+        result?.isAccessible = true
+        java.util.Optional.ofNullable(result)
+    }.orElse(null)
+
+private fun edgeCategoryOf(edge: Any): String? {
+    if (edge.javaClass.name != GRAPHQL_FEED_UNIT_EDGE_CLASS) return null
+    val getter = edgeCategoryGetterCache.getOrPut(edge.javaClass) {
+        var c: Class<*>? = edge.javaClass
+        var found: Method? = null
+        while (c != null && found == null) {
+            found = c.declaredMethods.firstOrNull { m ->
+                m.parameterCount == 0 && !m.isStatic && m.returnType.isEnum &&
+                    m.returnType.enumConstants?.let { consts ->
+                        consts.any { it.toString() == "SPONSORED" } && consts.any { it.toString() == "PROMOTION" }
+                    } == true
+            }
+            c = c.superclass
+        }
+        found?.isAccessible = true
+        java.util.Optional.ofNullable(found)
+    }.orElse(null) ?: return null
+    return (runCatching { getter.invoke(edge) }.getOrNull() as? Enum<*>)?.name
+}
+
+// ─── Litho feed component guard (upstream FeedGuardHook) ─────────────────────
+
+/** Litho layout entry-point arities seen across builds (A1F/A1H on 576). */
+private val FEED_RENDER_PARAMETER_COUNTS = listOf(1, 2)
+
+/**
+ * Cached feed rows render through Litho components whose spec names survive obfuscation as
+ * string constants ("NewsFeedFeedUnitComponent" and the generic "LoggingComponent"
+ * wrapper). The component holds the GraphQLFeedUnitEdge; when that edge is DEFINITELY
+ * sponsored, the render/layout method returns null and Litho skips the row.
+ *
+ * Pairs are matched structurally: the component declares an edge field, the wrapper a child
+ * field typed as the component, and both share a Litho layout context type. Render methods
+ * are matched by shape because their names rotate every build.
+ *
+ * @return the number of render methods newly hooked
+ */
+fun installFeedComponentGuard(
+    components: Collection<Class<*>>,
+    wrappers: Collection<Class<*>>,
+    inspector: FeedItemInspector,
+): Int {
+    var installed = 0
+    for (componentClass in components) {
+        val edgeField = runCatching { resolveFeedEdgeField(componentClass) }.getOrNull() ?: continue
+        for (wrapperClass in wrappers) {
+            if (wrapperClass == componentClass) continue
+            val childField = runCatching { resolveWrapperChildField(wrapperClass, componentClass) }.getOrNull()
+                ?: continue
+            val renderMethods = FEED_RENDER_PARAMETER_COUNTS.firstNotNullOfOrNull { count ->
+                val ctx = resolveLithoLayoutContextType(componentClass, wrapperClass, count)
+                    ?: return@firstNotNullOfOrNull null
+                listOf(componentClass, wrapperClass).flatMap { lithoLayoutMethods(it, ctx, count) }.ifEmpty { null }
+            } ?: continue
+            for (method in renderMethods) {
+                if (!markHooked(method)) continue
+                runCatching {
+                    method.isAccessible = true
+                    method.hookMethod {
+                        before { param ->
+                            val owner = param.thisObject ?: return@before
+                            val component = when {
+                                componentClass.isInstance(owner) -> owner
+                                wrapperClass.isInstance(owner) ->
+                                    runCatching { childField.get(owner) }.getOrNull()?.takeIf { componentClass.isInstance(it) }
+                                else -> null
+                            } ?: return@before
+                            val edge = runCatching { edgeField.get(component) }.getOrNull() ?: return@before
+                            if (runCatching { inspector.isDefinitelySponsoredFeedItem(edge) }.getOrDefault(false)) {
+                                param.result = null
+                            }
+                        }
+                    }
+                    installed++
+                }
+            }
+        }
+    }
+    return installed
+}
+
+/** Static builder factories share the layout shape — only instance methods are hooked. */
+private fun lithoLayoutMethods(type: Class<*>, contextType: Class<*>, parameterCount: Int): List<Method> =
+    type.declaredMethods.filter { m ->
+        !m.isStatic && m.parameterCount == parameterCount && !m.returnType.isPrimitive &&
+            m.parameterTypes[0] == contextType
+    }
+
+private fun resolveLithoLayoutContextType(componentClass: Class<*>, wrapperClass: Class<*>, parameterCount: Int): Class<*>? {
+    fun candidates(type: Class<*>) = type.declaredMethods.filter { m ->
+        !m.isStatic && m.parameterCount == parameterCount && !m.returnType.isPrimitive && !m.parameterTypes[0].isPrimitive
+    }.map { it.parameterTypes[0] }
+    val componentCandidates = candidates(componentClass)
+    val wrapperCandidates = candidates(wrapperClass).toSet()
+    return componentCandidates.firstOrNull { it in wrapperCandidates }
+        ?: componentCandidates.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+}
+
+private fun resolveFeedEdgeField(componentClass: Class<*>): Field? {
+    val declared = componentClass.declaredFields.filter { !Modifier.isStatic(it.modifiers) && !it.type.isPrimitive }
+    return (declared.firstOrNull { it.type.name == GRAPHQL_FEED_UNIT_EDGE_CLASS }
+        ?: declared.firstOrNull { declaresFeedStoryCategoryAccessor(it.type) })
+        ?.apply { isAccessible = true }
+}
+
+private fun resolveWrapperChildField(wrapperClass: Class<*>, componentClass: Class<*>): Field? =
+    wrapperClass.declaredFields.firstOrNull { f ->
+        !Modifier.isStatic(f.modifiers) && f.type != Any::class.java && f.type.isAssignableFrom(componentClass)
+    }?.apply { isAccessible = true }
+
+private fun declaresFeedStoryCategoryAccessor(type: Class<*>): Boolean = runCatching {
+    type.declaredMethods.any { m ->
+        m.parameterCount == 0 && m.returnType.isEnum &&
+            m.returnType.enumConstants?.any { val n = it.toString(); n == "SPONSORED" || n == "PROMOTION" } == true
+    }
+}.getOrDefault(false)
+
+// ─── Marketplace (upstream MarketplaceAdsHook) ────────────────────────────────
+
+/** Organic feed queries whose variables get the ad-skip rewrite. */
+private val MARKETPLACE_FEED_QUERY_NAMES = setOf(
+    "MarketplaceHomeFeedQueryRendererQuery",
+    "MarketplaceHomeFeedPaginationQuery",
+)
+
+/** Ad-only queries dropped outright. */
+private val MARKETPLACE_ADS_QUERY_MARKERS = listOf(
+    "MarketplaceHomeFeedAds",
+    "MarketplaceHomeFeedBoostedListingAds",
+    "MarketplaceHomeFeedThemedAds",
+)
+
+/** Server-honoured ad-skip flags in the feed query's variables JSON. */
+private val MARKETPLACE_AD_SKIP_FLAGS = listOf("shouldSkipAdRequest", "shouldSkipBoostedListingAdRequest")
+
+private val marketplaceQueryNameRegex = Regex("query[\\s]+([A-Za-z0-9_]+)")
+private val marketplaceFriendlyNameRegex = Regex("fb_api_req_friendly_name=([A-Za-z0-9_]+)")
+
+/** Render block: returning null from a Litho render/layout makes it skip the sponsored unit. */
+fun hookRenderNull(method: Method): Boolean {
+    if (method.returnType.isPrimitive || method.returnType == Void.TYPE) return false
+    return hookBlockNull(method)
+}
+
+/**
+ * The React Native Networking module's `sendRequest` (it keeps its RN name because JS calls
+ * it reflectively). Ad-only marketplace queries are dropped (void → the request never
+ * leaves), and the organic home-feed queries get their server-honoured ad-skip flags set,
+ * so the server itself omits the sponsored tiles.
+ */
+fun hookMarketplaceSendRequest(method: Method): Boolean {
+    if (method.returnType != Void.TYPE || method.parameterCount < 5 || !markHooked(method)) return false
+    method.isAccessible = true
+    method.hookMethod {
+        before { param ->
+            val data = param.args.getOrNull(4)
+            val body = requestBodyOf(data) ?: return@before
+            val name = marketplaceQueryNameRegex.find(body)?.groupValues?.get(1)
+                ?: marketplaceFriendlyNameRegex.find(body)?.groupValues?.get(1)
+            if (name in MARKETPLACE_FEED_QUERY_NAMES) {
+                val rewritten = rewriteMarketplaceFeedVariables(body) ?: return@before
+                readableMapWithString(data, rewritten)?.let { param.args[4] = it }
+                return@before
+            }
+            if (MARKETPLACE_ADS_QUERY_MARKERS.any { body.contains(it) }) param.result = null
+        }
+    }
+    return true
+}
+
+private fun requestBodyOf(data: Any?): String? {
+    if (data == null) return null
+    val hasKey = data.javaClass.methods.firstOrNull { it.name == "hasKey" && it.parameterCount == 1 } ?: return null
+    val getString = data.javaClass.methods.firstOrNull { it.name == "getString" && it.parameterCount == 1 } ?: return null
+    return runCatching {
+        if (hasKey.invoke(data, "string") != true) null else getString.invoke(data, "string") as? String
+    }.getOrNull()
+}
+
+private fun rewriteMarketplaceFeedVariables(body: String): String? {
+    val marker = "variables="
+    val markerIndex = body.indexOf(marker)
+    if (markerIndex < 0) return null
+    val valueStart = markerIndex + marker.length
+    val valueEnd = body.indexOf('&', valueStart).let { if (it < 0) body.length else it }
+    val decoded = runCatching { URLDecoder.decode(body.substring(valueStart, valueEnd), "UTF-8") }.getOrNull() ?: return null
+    val variables = runCatching { JSONObject(decoded) }.getOrNull() ?: return null
+    var changed = false
+    for (flag in MARKETPLACE_AD_SKIP_FLAGS) {
+        if (variables.optBoolean(flag, false)) continue
+        variables.put(flag, true); changed = true
+    }
+    if (!changed) return null
+    return body.substring(0, valueStart) + URLEncoder.encode(variables.toString(), "UTF-8") + body.substring(valueEnd)
+}
+
+/** RN's WritableNativeMap is public API with a no-arg constructor and putString. */
+private fun readableMapWithString(original: Any?, body: String): Any? {
+    if (original == null) return null
+    return runCatching {
+        val mapClass = original.javaClass.classLoader!!.loadClass("com.facebook.react.bridge.WritableNativeMap")
+        val instance = mapClass.getDeclaredConstructor().newInstance()
+        val putString = mapClass.methods.firstOrNull {
+            it.name == "putString" && it.parameterCount == 2 &&
+                it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java
+        } ?: return@runCatching null
+        putString.invoke(instance, "string", body)
+        instance
+    }.getOrNull()
 }
