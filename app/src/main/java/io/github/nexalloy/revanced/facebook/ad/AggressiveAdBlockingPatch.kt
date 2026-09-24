@@ -4,7 +4,6 @@ import io.github.nexalloy.patch
 import io.github.nexalloy.revanced.facebook.hookBannerBoolean
 import io.github.nexalloy.revanced.facebook.hookBlockNull
 
-
 val AggressiveAdBlocking = patch(
     name = "Aggressive banner & ad-break blocking",
     description = "Broad upstream hooks: ad-break state machine and banner-ad boolean sweep. May break some screens; off by default.",

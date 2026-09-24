@@ -53,7 +53,6 @@ import io.github.nexalloy.revanced.facebook.hookReceiverSponsoredNull
 import io.github.nexalloy.revanced.facebook.hookNewsfeedSponsoredFilter
 import io.github.nexalloy.revanced.facebook.installFeedComponentGuard
 import io.github.nexalloy.revanced.facebook.hookMarketplaceSendRequest
-import io.github.nexalloy.revanced.facebook.hookRenderNull
 import java.lang.reflect.Method
 
 /**
@@ -377,6 +376,10 @@ val HideFacebookAds = patch(
     }
 
     // ── 16. Litho feed component guard ─────────────────
+    //
+    // Complements the CSR filter and late-list sanitisers above (sections 4–5, which already
+    // match upstream's Feed ad guard): the component that draws a feed unit refuses to draw
+    // a DEFINITELY sponsored edge. Component/wrapper pairs are matched by shape.
 
     runCatching {
         fun classesOf(list: List<org.luckypray.dexkit.wrap.DexMethod>) =
@@ -386,7 +389,10 @@ val HideFacebookAds = patch(
         installFeedComponentGuard(components, wrappers, FeedItemInspector(emptyList()))
     }
 
-    // ── 17. Feed ad pipeline (upstream AdTargets — feed installer) ──────────────
+    // ── 17. Feed ad pipeline ──────────────
+    //
+    // Upstream's "FeedSponsoredStoryHolder.getTopValidAd" vend is not repeated: section 7's
+    // vendor hook already covers that literal.
 
     SponsoredDataCheck.init(classLoader)
 
@@ -396,7 +402,7 @@ val HideFacebookAds = patch(
     runCatching { ::feedSponsoredRenderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
         .forEach { dm -> runCatching { hookSponsoredNull(dm.toMethod()) } }
 
-    // ── 18. Reels ads (upstream AdTargets — reels installer) ────────────────────
+    // ── 18. Reels ads ────────────────────
 
     runCatching { ::reelsAdBlockMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
         .forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
@@ -405,10 +411,14 @@ val HideFacebookAds = patch(
         .forEach { dm -> runCatching { hookReceiverSponsoredNull(dm.toMethod()) } }
 
     // ── 19. Marketplace ───────────────────────────
+    //
+    // Adds to the MarketplaceAdsPluginPack block in section 1: the sponsored-unit components
+    // stop rendering, the ad-only Relay queries are dropped, and the organic home-feed
+    // queries get the server-honoured ad-skip flags set.
 
     runCatching { ::marketplaceSendRequestFingerprint.dexMethodList }.getOrNull().orEmpty()
         .forEach { dm -> runCatching { hookMarketplaceSendRequest(dm.toMethod()) } }
 
     runCatching { ::marketplaceAdRenderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookRenderNull(dm.toMethod()) } }
+        .forEach { dm -> runCatching { hookNullAdResult(dm.toMethod()) } }
 }

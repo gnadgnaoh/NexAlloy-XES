@@ -2,7 +2,7 @@ package io.github.nexalloy.revanced.facebook.ad
 
 import io.github.nexalloy.patch
 import io.github.nexalloy.revanced.facebook.hookAdRequestNoOp
-import io.github.nexalloy.revanced.facebook.hookBlockFalse
+import io.github.nexalloy.revanced.facebook.hookForceBoolean
 import io.github.nexalloy.revanced.facebook.hookBlockNull
 import io.github.nexalloy.revanced.facebook.hookNullAdResult
 import io.github.nexalloy.revanced.facebook.hookVideoViewerExtensionGate
@@ -39,5 +39,5 @@ val HideInstreamAdBreaks = patch(
         .forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
 
     runCatching { ::tapToFullscreenAdFetchFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookBlockFalse(dm.toMethod()) } }
+        .forEach { dm -> runCatching { hookForceBoolean(dm.toMethod(), false) } }
 }

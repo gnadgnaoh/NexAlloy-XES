@@ -1,7 +1,7 @@
 package io.github.nexalloy.revanced.facebook.ad
 
 import io.github.nexalloy.patch
-import io.github.nexalloy.revanced.facebook.hookForceTrue
+import io.github.nexalloy.revanced.facebook.hookForceBoolean
 
 val SpoofAdFreeSession = patch(
     name = "Spoof ad-free session",
@@ -11,5 +11,5 @@ val SpoofAdFreeSession = patch(
         error("Facebook feed dex is not visible yet - deferring patch")
     }
     val getters = runCatching { ::adFreeSessionGettersFingerprint.dexMethodList }.getOrNull().orEmpty()
-    getters.forEach { dm -> runCatching { hookForceTrue(dm.toMethod()) } }
+    getters.forEach { dm -> runCatching { hookForceBoolean(dm.toMethod(), true) } }
 }
