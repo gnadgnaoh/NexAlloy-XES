@@ -1,11 +1,13 @@
 package io.github.nexalloy.revanced.facebook.ad
 
 import io.github.nexalloy.revanced.facebook.GRAPHQL_FEED_UNIT_EDGE_CLASS
+import io.github.nexalloy.revanced.facebook.isLoaderInfra
 import io.github.nexalloy.morphe.findClassDirect
 import io.github.nexalloy.morphe.findMethodDirect
 import io.github.nexalloy.morphe.findMethodListDirect
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.enums.MatchType
+import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.result.ClassData
 import org.luckypray.dexkit.result.MethodData
 import java.lang.reflect.Modifier
@@ -448,27 +450,55 @@ val sponsoredStoryNextMethodFingerprint = findMethodDirect {
 }
 
 // ─── Story ads in-disc source ─────────────────────────────────────────────────
-// Upstream changed search string to "ads_deletion" (from commit fixing profile timeline ads)
+//
+// Re-anchored (synced with upstream's finding). The telemetry labels "ads_deletion" and
+// "ads_insertion" are NOT reliable class selectors: unrelated story-viewer classes log them
+// too, and upstream found that hooking one of those (576's X.BAl, the viewer's own
+// onDataChanged) blanks the story viewer. The dedicated story-ad store is instead
+// identified by literals only it carries:
+//
+//   AdsPaginatingNetworkAdBucketFetcher, FbStoryAdInDiscStoreImpl,
+//   IN_DISC_METADATA_KEY, AD_BUCKETS_KEY
+//
+// Each candidate must ALSO carry the provider shape (merge + deferred update), so a class
+// that merely mentions one of these strings is still rejected. "ads_deletion" survives
+// only as a last-resort fallback when none of the store literals resolve at all.
+
+private val STORY_AD_STORE_TAGS = listOf(
+    "AdsPaginatingNetworkAdBucketFetcher",
+    "FbStoryAdInDiscStoreImpl",
+    "IN_DISC_METADATA_KEY",
+    "AD_BUCKETS_KEY",
+)
+
+private fun ClassData.hasStoryAdProviderShape(): Boolean =
+    findMethod {
+        matcher {
+            returnType = "com.google.common.collect.ImmutableList"
+            paramTypes("com.facebook.auth.usersession.FbUserSession", null, "com.google.common.collect.ImmutableList")
+        }
+    }.isNotEmpty() && findMethod {
+        matcher { returnType = "void"; paramTypes(null, "com.google.common.collect.ImmutableList") }
+    }.isNotEmpty()
+
+private fun DexKitBridge.storyAdProviderClasses(): List<ClassData> {
+    val byStore = classesUsingAnyOf(STORY_AD_STORE_TAGS).filter { it.hasStoryAdProviderShape() }
+    if (byStore.isNotEmpty()) return byStore.distinctBy { it.name }
+    return findMethod { matcher { usingStrings("ads_deletion") } }
+        .mapNotNull { it.declaredClass }
+        .filter { it.hasStoryAdProviderShape() }
+        .distinctBy { it.name }
+}
 
 val storyAdsInDiscClassFingerprint = findClassDirect {
-    findMethod {
-        matcher { usingStrings("ads_deletion") }
-    }.first { md ->
-        val cls = md.declaredClass ?: return@first false
-        cls.findMethod {
-            matcher {
-                returnType = "com.google.common.collect.ImmutableList"
-                paramTypes("com.facebook.auth.usersession.FbUserSession", null, "com.google.common.collect.ImmutableList")
-            }
-        }.isNotEmpty() && cls.findMethod {
-            matcher { returnType = "void"; paramTypes(null, "com.google.common.collect.ImmutableList") }
-        }.isNotEmpty()
-    }.declaredClass!!
+    storyAdProviderClasses().firstOrNull() ?: error("Story ad provider class not found")
 }
 
 /**
- * The specific 0-param void method inside storyAdsInDiscClass that triggers ad insertion.
- * Upstream finds this via usingStrings("ads_insertion") — we replicate that here.
+ * The 0-param void insertion trigger inside the provider: the method that itself logs
+ * "ads_insertion". The previous fallback — "the first 0-param void method on the class" —
+ * is gone: on an obfuscated class that is a guess, and a wrong guess no-ops an arbitrary
+ * lifecycle method.
  */
 val storyAdsInsertionTriggerMethodFingerprint = findMethodDirect {
     storyAdsInDiscClassFingerprint().findMethod {
@@ -477,11 +507,7 @@ val storyAdsInsertionTriggerMethodFingerprint = findMethodDirect {
             paramCount = 0
             usingStrings("ads_insertion")
         }
-    }.firstOrNull()
-        ?: storyAdsInDiscClassFingerprint().findMethod {
-            // Fallback: first 0-param void method if string not found (obfuscated builds)
-            matcher { returnType = "void"; paramCount = 0 }
-        }.first()
+    }.first()
 }
 
 // ─── Game ad request methods ──────────────────────────────────────────────────
@@ -550,24 +576,10 @@ val feedCollectionAddEdgeMethodFingerprint = findMethodDirect {
 }
 
 // ─── Story ad source providers (all of them) ──────────────────────────────────
-// Upstream pinned SIX provider classes by name (FB571_STORY_AD_SOURCE_CLASSES) because
-// the single-class DexKit lookup missed the split pipelines. This returns EVERY class
-// that both logs "ads_deletion" and carries the provider shape, so no name is needed.
-// Verified on FB 573: three classes log "ads_deletion", exactly one carries the shape.
+// Every class that carries the story-ad store literals AND the provider shape; one
+// representative method per class (the patch only uses the declaring class).
 val storyAdsInDiscMethodsFingerprint = findMethodListDirect {
-    findMethod {
-        matcher { usingStrings("ads_deletion") }
-    }.filter { md ->
-        val cls = md.declaredClass ?: return@filter false
-        cls.findMethod {
-            matcher {
-                returnType = "com.google.common.collect.ImmutableList"
-                paramTypes("com.facebook.auth.usersession.FbUserSession", null, "com.google.common.collect.ImmutableList")
-            }
-        }.isNotEmpty() && cls.findMethod {
-            matcher { returnType = "void"; paramTypes(null, "com.google.common.collect.ImmutableList") }
-        }.isNotEmpty()
-    }.distinctBy { it.declaredClass?.name }
+    storyAdProviderClasses().mapNotNull { cls -> cls.methods.firstOrNull { it.isMethod } }
 }
 
 // ─── Video plugin system: packs, descriptors, static builders ─────────────────
@@ -1142,4 +1154,314 @@ val wasLiveAdBreakControlRenderMethodsFingerprint = findMethodListDirect {
                 it.isHookableMethod()
         }
         .distinctBy { it.descriptor }
+}
+
+
+// ═══ Upstream FacebookAppAdsRemover (module 1.15) ═════════════════════════════
+//
+// Fingerprints for SpoofAdFreeSession, HideReelsShopping and AggressiveAdBlocking. Anchored
+// on literals the app ships (a prefs path, Litho component names, banner QPL events), then
+// narrowed by shape — no obfuscated name is pinned.
+
+private const val ACC_BRIDGE = 0x0040
+private const val ACC_SYNTHETIC = 0x1000
+
+private val PRIMITIVE_TYPE_NAMES = setOf("int", "long", "boolean", "float", "double", "short", "byte", "char", "void")
+
+private fun MethodData.isPlainHookTarget(): Boolean =
+    isMethod && name != "<clinit>" && !Modifier.isAbstract(modifiers)
+
+// ─── 1. Ad-free session spoof (upstream AdsOptOutHook) ───────────────────────
+
+/**
+ * The BasicAds opt-in / ad-free-session status class — the only class in the app using the
+ * exact literal "adprefs/" — and its boolean, zero-arg, non-static getters: the
+ * ad-free-session getter ("afsos") and the basic-ads opt-status getter ("baos").
+ */
+val adFreeSessionGettersFingerprint = findMethodListDirect {
+    val cls = findClass { matcher { addUsingString("adprefs/", StringMatchType.Equals) } }.firstOrNull()
+        ?: error("BasicAds opt-in class not found (anchor adprefs/)")
+    cls.findMethod { matcher { returnType = "boolean"; paramCount = 0 } }
+        .filter { it.isPlainHookTarget() && !Modifier.isStatic(it.modifiers) }
+}
+
+// ─── 7. Reels shopping cards (upstream ReelsShoppingHook) ────────────────────
+
+private val REELS_SHOPPING_ANCHORS = listOf(
+    "FbShortsShoppableProductItemComponent",
+    "FbShortsShoppableAdsItemComponent",
+    "FbShortsShoppableMarketplaceCardComponent",
+)
+
+/**
+ * The `render` of every shoppable product-card component. Two passes, as upstream:
+ *  - anchor pass: the three component-name literals;
+ *  - structural pass: the non-framework field type shared by at least two anchored classes
+ *    is the shopping payload; every class holding a field of that type AND declaring
+ *    `render` is a shopping card too (banner, marketplace card, hscroll items…).
+ */
+val reelsShoppingRenderMethodsFingerprint = findMethodListDirect {
+    val anchorClasses = classesUsingAnyOf(REELS_SHOPPING_ANCHORS)
+    val counts = HashMap<String, Int>()
+    anchorClasses.forEach { cls ->
+        cls.fields.filter { !Modifier.isStatic(it.modifiers) }.forEach { f -> counts.merge(f.typeName, 1, Int::plus) }
+    }
+    val payloadType = counts.entries
+        .filter { (type, count) -> count >= 2 && !type.startsWith("java.") && type !in PRIMITIVE_TYPE_NAMES }
+        .maxByOrNull { it.value }?.key
+
+    val structural = payloadType?.let { type ->
+        runCatching {
+            findClass {
+                matcher {
+                    fields { addForType(type) }
+                    methods {
+                        matchType = MatchType.Contains
+                        add { name = "render" }
+                    }
+                }
+            }.toList()
+        }.getOrDefault(emptyList())
+    }.orEmpty()
+
+    (anchorClasses + structural).distinctBy { it.descriptor }.flatMap { cls ->
+        cls.methods.filter { it.name == "render" && !Modifier.isStatic(it.modifiers) && it.isPlainHookTarget() }.take(1)
+    }.distinctBy { it.descriptor }
+}
+
+// ─── 4e + 5. Aggressive (upstream, off by default in NexAlloy) ───────────────
+
+/** Every method using "AdBreakStateMachine" — the unified ad-break controller. Broad. */
+val adBreakStateMachineMethodsFingerprint = findMethodListDirect {
+    methodsUsingAnyOf(listOf("AdBreakStateMachine")).filter { it.isPlainHookTarget() }
+}
+
+/** The ~35 banner-ad QPL events, log literals and JNI names the original mod scanned for. */
+private val BANNER_ANCHORS = listOf(
+    "banner_ad", "banner_ads", "banner_ads_overlay", "bannerAdsOverlay",
+    "banner_ad_visible", "banner_ad_dismiss", "banner_ad_click",
+    "banner_ads_impression", "affiliate_link_banner_impression",
+    "try_it_surface_banner_impression",
+    "click_on_instream_legacy_banner_ad",
+    "click_on_instream_legacy_banner_ad_context_card",
+    "click_on_reel_instream_unified_player_banner_ad",
+    "click_on_reel_banner_call_ad",
+    "reels_banner_click_iab_inline", "reels_banner_click_iab_chaining",
+    "reels_banner_click_wnb_inline", "reels_banner_click_wnb_chaining",
+    "banner_ad_above_metadata_transition_key", "bannerAdSurfaceDelayMs",
+    "bannerAdBreak", "bannerPo",
+    "Kicking off banner ads fetch",
+    "error while trying to load banner ad",
+    "Failed to fetch banner ad",
+    "loadbanneradasync", "hidebanneradasync",
+    "banner_ads_click", "banner_ads_report_ad", "banner_ads_hide_ad",
+    "affiliate_link_banner_click", "affiliate_link_attachment_banner_click",
+    "mailboxinthreadadcontextbannerjni", "zero_banner_impression",
+    "banner_upgrade_mobile_plan",
+)
+
+private const val MAX_BANNER_CLASSES = 100
+
+/**
+ * Every boolean method (≥1 param) of every class that uses one of [BANNER_ANCHORS] as an
+ * EXACT string-pool constant (Contains over-matched upstream: 'bannerPo' hit
+ * 'bannerPosition' and pulled in event-logging plumbing). Loader infrastructure, equals(),
+ * synthetic and bridge methods are excluded at scan time, so a poisoned entry never reaches
+ * the cache.
+ */
+val bannerBooleanMethodsFingerprint = findMethodListDirect {
+    val byAnchor: Map<String, List<ClassData>> = runCatching {
+        batchFindClassUsingStrings {
+            groups(BANNER_ANCHORS.associateWith { listOf(it) }, StringMatchType.Equals)
+        }.mapValues { it.value.toList() }
+    }.getOrElse {
+        BANNER_ANCHORS.associateWith { anchor ->
+            runCatching {
+                findClass { matcher { addUsingString(anchor, StringMatchType.Equals) } }.toList()
+            }.getOrDefault(emptyList())
+        }
+    }
+    val classes = LinkedHashMap<String, ClassData>()
+    for (anchor in BANNER_ANCHORS) {
+        byAnchor[anchor].orEmpty().forEach { cls -> if (!isLoaderInfra(cls.name)) classes.putIfAbsent(cls.name, cls) }
+        if (classes.size >= MAX_BANNER_CLASSES) break
+    }
+    classes.values.flatMap { cls ->
+        cls.methods.filter { m ->
+            m.isPlainHookTarget() &&
+                m.returnTypeName == "boolean" &&
+                m.paramTypeNames.isNotEmpty() &&
+                !(m.name == "equals" && m.paramTypeNames.size == 1) &&
+                (m.modifiers and (ACC_SYNTHETIC or ACC_BRIDGE)) == 0 &&
+                m.name != "loadLibrary" && m.name != "loadLibraryUnsafe"
+        }
+    }.distinctBy { it.descriptor }
+}
+
+/**
+ * Every method using any of [filters]' tags, each tag narrowed by its own shape test, in one
+ * native pass (batchFindMethodUsingStrings). Falls back to one query per tag if the batch
+ * API fails. Tags use DexKit's default Contains match, exactly as upstream's findMethod did.
+ */
+private fun DexKitBridge.methodsForTags(filters: Map<String, (MethodData) -> Boolean>): List<MethodData> {
+    val byTag: Map<String, List<MethodData>> = runCatching {
+        batchFindMethodUsingStrings { groups(filters.keys.associateWith { listOf(it) }) }
+            .mapValues { it.value.toList() }
+    }.getOrElse {
+        filters.keys.associateWith { tag ->
+            runCatching { findMethod { matcher { usingStrings(tag) } }.toList() }.getOrDefault(emptyList())
+        }
+    }
+    return filters.flatMap { (tag, shapeOk) ->
+        byTag[tag].orEmpty().filter { it.isPlainHookTarget() && shapeOk(it) }
+    }.distinctBy { it.descriptor }
+}
+
+private fun ClassData.representativeMethod(): MethodData? =
+    methods.firstOrNull { it.isMethod } ?: methods.firstOrNull()
+
+// ─── 2. Classic feed: processNewStories Runnable (upstream NewsfeedFilterHook) ─
+
+/** The processNewStories Runnable's run(), found by its unique "Added stories to FUC". */
+val newsfeedProcessNewStoriesRunFingerprint = findMethodDirect {
+    findClass { matcher { addUsingString("Added stories to FUC", StringMatchType.Equals) } }
+        .firstNotNullOfOrNull { cls ->
+            cls.findMethod { matcher { name = "run"; paramCount = 0; returnType = "void" } }.firstOrNull()
+        } ?: error("processNewStories Runnable not found")
+}
+
+// ─── 3. Litho feed component guard (upstream FeedGuardHook) ──────────────────
+
+/**
+ * Litho generated components pass their spec name to the base constructor as a String
+ * constant, and that constant survives obfuscation. One representative method per class is
+ * returned — only its declaring class is used.
+ */
+val feedUnitComponentClassesFingerprint = findMethodListDirect {
+    findClass { matcher { usingStrings(listOf("NewsFeedFeedUnitComponent"), StringMatchType.Equals) } }
+        .mapNotNull { it.representativeMethod() }
+}
+
+val feedWrapperComponentClassesFingerprint = findMethodListDirect {
+    findClass { matcher { usingStrings(listOf("LoggingComponent"), StringMatchType.Equals) } }
+        .mapNotNull { it.representativeMethod() }
+}
+
+// ─── 4a. Feed ad pipeline (upstream AdTargets, feed installer) ───────────────
+
+/**
+ * BLOCK_NULL targets on the feed ad channel and sponsored pool/vend pipeline.
+ *
+ * Upstream's `ads.sponsoredVend` ("FeedSponsoredStoryHolder.getTopValidAd") is deliberately
+ * NOT here: NexAlloy's own [sponsoredStoryVendorMethodsFingerprint] already covers that
+ * anchor (plus the rerank path), more narrowly, so listing it twice would only double-hook.
+ */
+val feedAdChannelBlockMethodsFingerprint = findMethodListDirect {
+    methodsForTags(
+        mapOf(
+            "FeedNetworkController.doAdChannelNetworkRequest" to { _: MethodData -> true },
+            "ADS_CHANNEL_BACKGROUND_PREFETCH" to { m: MethodData -> m.paramTypeNames.size == 8 },
+            "Cannot add null or non-sponsored story" to { _: MethodData -> true },
+            "not expected to be called in ad selection" to { _: MethodData -> true },
+            "FBMultiAdsFeedUnitKComponent" to { m: MethodData -> m.paramTypeNames.size == 1 },
+        )
+    )
+}
+
+// ─── 4b. Sponsored renders, ad-checked (upstream SPONSORED_NULL) ─────────────
+
+val feedSponsoredRenderMethodsFingerprint = findMethodListDirect {
+    methodsForTags(
+        mapOf(
+            "NPE of attachment story" to { _: MethodData -> true },
+            "Nothing Rendered." to { _: MethodData -> true },
+        )
+    )
+}
+
+// ─── 4c. Video ads (upstream AdTargets, video-ads installer) ─────────────────
+
+/**
+ * `ads.videoAdFetch` and `ads.extendedBreaksFetch` are not repeated here: NexAlloy's
+ * [adBreakFetchKickoffMethodsFingerprint] already anchors on the same two literals.
+ */
+val videoAdBlockMethodsFingerprint = findMethodListDirect {
+    methodsForTags(
+        mapOf(
+            // The AdBreakStory setter: never assigned, so no ad break is inserted between stories.
+            "Fetched and altered AdBreakStory when there's already an adbreak playing" to { m: MethodData -> m.paramTypeNames.size == 3 },
+            "fb_in_content_ads" to { _: MethodData -> true },
+            "-WVCDF-NO-AD" to { _: MethodData -> true },
+        )
+    )
+}
+
+/** `maybeFetchTapToFullscreenAd` keeps its real name; its class is pinned by a literal. */
+val tapToFullscreenAdFetchFingerprint = findMethodListDirect {
+    findMethod {
+        matcher {
+            name = "maybeFetchTapToFullscreenAd"
+            declaredClass { usingStrings("Host story doesn't have a media attachment") }
+        }
+    }.filter { it.isPlainHookTarget() }
+}
+
+// ─── 4d. Reels ads (upstream AdTargets, reels installer) ─────────────────────
+
+val reelsAdBlockMethodsFingerprint = findMethodListDirect {
+    methodsForTags(
+        mapOf(
+            // Only the void query builders are null-safe; a ListenableFuture sibling is not.
+            "FBFetchReelsVideoAdsQuery" to { m: MethodData -> m.returnTypeName == "void" },
+            "REELS_BLOKS_BANNER_ADS_RENDER_COMPONENT_TEST_KEY" to { m: MethodData -> m.paramTypeNames.size == 1 },
+            // The launch-params builder that puts every Reels ad prop.
+            "ReelsIsEligibleForInContentAds" to { m: MethodData -> m.returnTypeName == "void" },
+            // IdleState.onEnter of the post-loop/banner ad state machine.
+            "REPLACE_POSTLOOP_WITH_BANNER" to { _: MethodData -> true },
+            // Story ad-bucket parse; the String filter keeps out an R8 string table.
+            "AdBucketParser.parse validation" to { m: MethodData -> m.returnTypeName != "java.lang.String" },
+        )
+    )
+}
+
+/**
+ * The Shorts mid-card unit's __typename getter: a bare TreeJNI wrapper with no strings, so
+ * the anchor is its TreeJNI constant pair (field hash + inline hash). Schema-derived, not
+ * obfuscation-derived; if Facebook changes the schema this simply matches nothing.
+ */
+val shortsMidCardTypeNodeFingerprint = findMethodListDirect {
+    findMethod { matcher { usingNumbers(3386882, 1742214758) } }.filter { it.isPlainHookTarget() }
+}
+
+// ─── 6. Marketplace (upstream MarketplaceAdsHook) ────────────────────────────
+
+private val MARKETPLACE_RENDER_ANCHORS = listOf(
+    "MarketplaceVideoAdQuery",
+    "MarketplaceVideoAdsComponent",
+    "MarketplaceVideoAdsGrootLayoutSpec",
+)
+
+/**
+ * Render/layout entry points of the Marketplace sponsored-unit components: `render`, or any
+ * instance method taking one non-primitive argument (the Litho context) and returning a
+ * non-primitive (the component tree).
+ */
+val marketplaceAdRenderMethodsFingerprint = findMethodListDirect {
+    classesUsingAnyOf(MARKETPLACE_RENDER_ANCHORS).flatMap { cls ->
+        cls.methods.filter { m ->
+            m.isPlainHookTarget() && !Modifier.isStatic(m.modifiers) && (m.modifiers and ACC_SYNTHETIC) == 0 && (
+                m.name == "render" || (
+                    m.paramTypeNames.size == 1 && m.paramTypeNames[0] !in PRIMITIVE_TYPE_NAMES &&
+                        m.returnTypeName !in PRIMITIVE_TYPE_NAMES
+                    )
+                )
+        }
+    }.distinctBy { it.descriptor }
+}
+
+/** The React Native Networking module's sendRequest (9 params, RN-native name). */
+val marketplaceSendRequestFingerprint = findMethodListDirect {
+    classesUsingAnyOf(listOf("FBNetworkingModule_React_Native")).flatMap { cls ->
+        cls.methods.filter { it.name == "sendRequest" && it.paramTypeNames.size == 9 && it.isPlainHookTarget() }
+    }.distinctBy { it.descriptor }
 }

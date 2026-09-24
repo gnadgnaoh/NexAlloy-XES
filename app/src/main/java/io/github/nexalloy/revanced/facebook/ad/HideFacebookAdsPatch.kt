@@ -46,6 +46,14 @@ import io.github.nexalloy.revanced.facebook.resolveListBuilderAppendMethod
 import io.github.nexalloy.revanced.facebook.resolveListBuilderFactoryMethod
 import io.github.nexalloy.revanced.facebook.resolveInstreamBannerEligibilityMethod
 import io.github.nexalloy.revanced.facebook.resolveStoryAdProviderHooks
+import io.github.nexalloy.revanced.facebook.SponsoredDataCheck
+import io.github.nexalloy.revanced.facebook.hookBlockNull
+import io.github.nexalloy.revanced.facebook.hookSponsoredNull
+import io.github.nexalloy.revanced.facebook.hookReceiverSponsoredNull
+import io.github.nexalloy.revanced.facebook.hookNewsfeedSponsoredFilter
+import io.github.nexalloy.revanced.facebook.installFeedComponentGuard
+import io.github.nexalloy.revanced.facebook.hookMarketplaceSendRequest
+import io.github.nexalloy.revanced.facebook.hookRenderNull
 import java.lang.reflect.Method
 
 /**
@@ -60,6 +68,12 @@ import java.lang.reflect.Method
  *  - Adds hookAudienceNetworkRewardFallbacks (reward completion callbacks)
  *  - Sets RESULT_OK (not RESULT_CANCELED) when finishing game ad activities
  *  - Changes storyAdsInDisc search string to "ads_deletion"
+ *
+ * Synced with upstream FacebookAppAdsRemover 1.15 (2026-09):
+ *  - processNewStories SPONSORED filter and Litho feed component guard
+ *  - the original mod's feed/reels hook map (AdTargets) with the TreeJNI sponsored_data check
+ *  - Marketplace render block + ad-query drop / ad-skip flag rewrite
+ *  - story ad provider re-anchored on the story-ad store literals (fix)
  */
 val HideFacebookAds = patch(
     name = "Hide Facebook ads",
@@ -225,12 +239,13 @@ val HideFacebookAds = patch(
 
     // ── 8. Story ad provider (in-disc) ────────────────────────────────────────
 
-    // Every class that logs "ads_deletion" AND carries the provider shape — this replaces
-    // both the single-class lookup and the six pinned FB571_STORY_AD_SOURCE_CLASSES.
+    // Every class carrying the story-ad STORE literals (AdsPaginatingNetworkAdBucketFetcher,
+    // FbStoryAdInDiscStoreImpl, IN_DISC_METADATA_KEY, AD_BUCKETS_KEY) AND the provider shape.
+    // "ads_deletion" is only a fallback now — see storyAdsInDiscClassFingerprint.
     val insertionTrigger = runCatching { ::storyAdsInsertionTriggerMethodFingerprint.method }.getOrNull()
     val providerClasses = runCatching {
         ::storyAdsInDiscMethodsFingerprint.dexMethodList.mapNotNull { dm ->
-            runCatching { dm.toMethod().declaringClass }.getOrNull()
+            runCatching { classLoader.loadClass(dm.className) }.getOrNull()
         }.distinct()
     }.getOrNull().orEmpty().ifEmpty {
         listOfNotNull(runCatching { ::storyAdsInDiscClassFingerprint.clazz }.getOrNull())
@@ -351,4 +366,49 @@ val HideFacebookAds = patch(
             before { param -> param.result = null }
         }
     }
+
+    // ── 15. Classic feed entry: processNewStories (upstream NewsfeedFilterHook) ──
+    //
+    // The Runnable that hands newly fetched stories to the feed collection. Edges whose
+    // GraphQLFeedStoryCategory is SPONSORED are dropped before run() sees them.
+
+    runCatching {
+        hookNewsfeedSponsoredFilter(::newsfeedProcessNewStoriesRunFingerprint.method, classLoader)
+    }
+
+    // ── 16. Litho feed component guard ─────────────────
+
+    runCatching {
+        fun classesOf(list: List<org.luckypray.dexkit.wrap.DexMethod>) =
+            list.mapNotNull { runCatching { classLoader.loadClass(it.className) }.getOrNull() }.distinct()
+        val components = classesOf(::feedUnitComponentClassesFingerprint.dexMethodList)
+        val wrappers = classesOf(::feedWrapperComponentClassesFingerprint.dexMethodList)
+        installFeedComponentGuard(components, wrappers, FeedItemInspector(emptyList()))
+    }
+
+    // ── 17. Feed ad pipeline (upstream AdTargets — feed installer) ──────────────
+
+    SponsoredDataCheck.init(classLoader)
+
+    runCatching { ::feedAdChannelBlockMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
+
+    runCatching { ::feedSponsoredRenderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookSponsoredNull(dm.toMethod()) } }
+
+    // ── 18. Reels ads (upstream AdTargets — reels installer) ────────────────────
+
+    runCatching { ::reelsAdBlockMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
+
+    runCatching { ::shortsMidCardTypeNodeFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookReceiverSponsoredNull(dm.toMethod()) } }
+
+    // ── 19. Marketplace ───────────────────────────
+
+    runCatching { ::marketplaceSendRequestFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookMarketplaceSendRequest(dm.toMethod()) } }
+
+    runCatching { ::marketplaceAdRenderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookRenderNull(dm.toMethod()) } }
 }
