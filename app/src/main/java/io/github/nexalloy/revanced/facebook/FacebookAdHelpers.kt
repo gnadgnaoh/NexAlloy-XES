@@ -275,7 +275,15 @@ private val audienceNetworkRewardClassesHooked  = Collections.newSetFromMap(Conc
 private val storyAdProviderClassesHooked        = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 private val feedCsrMethodsHooked                 = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 private val lateFeedMethodsHooked                = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
-private val sponsoredPoolMethodsHooked           = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+/**
+ * The ONE registry of single-method ad hooks (request layer, plugin gates, sponsored pool,
+ * and the upstream hook actions). Keyed by [methodHookKey], so two fingerprints that land on
+ * the same method — e.g. upstream's "Cannot add null or non-sponsored story" and NexAlloy's
+ * sponsored-pool add — hook it once, whichever runs first.
+ */
+private val adHooksInstalled = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+private fun markHooked(method: Method): Boolean = adHooksInstalled.add(methodHookKey(method))
 private val feedComponentMethodsHooked           = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 private val feedSectionMethodsHooked             = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 private val feedCollectionMethodsHooked          = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
@@ -900,7 +908,6 @@ private fun isAdOnlyPluginPack(instance: Any): Boolean {
  */
 val AD_ONLY_PLUGIN_PACK_TOKENS = listOf("Ads", "AdBreak", "AdOverlay", "SqueezebackAd")
 
-private val pluginHooksInstalled = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
 /**
  * Empties the plugin list of an ads-only pack.
@@ -912,7 +919,7 @@ private val pluginHooksInstalled = Collections.newSetFromMap(ConcurrentHashMap<S
  *  - some ad pack names are assembled at runtime and no static string can match them.
  */
 fun hookPluginPackList(method: Method) {
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    if (!markHooked(method)) return
     method.hookMethod {
         after { param ->
             val instance = param.thisObject ?: return@after
@@ -931,7 +938,7 @@ fun hookPluginPackList(method: Method) {
  * delivered by packs no name-based hook can reach.
  */
 fun hookPluginDescriptorGate(method: Method) {
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    if (!markHooked(method)) return
     method.hookMethod {
         before { param ->
             val instance = param.thisObject ?: return@before
@@ -966,7 +973,7 @@ fun hookPluginDescriptorGate(method: Method) {
  * over. An ad id is present or it is not.
  */
 fun hookTimelineStoryRender(method: Method, inspector: FeedItemInspector) {
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    if (!markHooked(method)) return
     // The story type is derived, not guessed: the component declares a private boolean
     // guard taking exactly the story it renders, so that parameter names the type, and the
     // field of that type is the story. "First interface-typed field" would pick the wrong
@@ -1000,7 +1007,7 @@ fun hookTimelineStoryRender(method: Method, inspector: FeedItemInspector) {
 // Facebook's own code rather than a missed ad.
 
 /**
- * Skips a `void` ad-request method entirely.
+ * Skips a `void` ad-request method entirely. A shape-restricted front for [hookBlockNull].
  *
  * Restricted to `void` on purpose. Xposed reports "skip the body" by setting a result,
  * and for any other return type that result has to be a value the caller can use — a
@@ -1009,15 +1016,13 @@ fun hookTimelineStoryRender(method: Method, inspector: FeedItemInspector) {
  */
 fun hookAdRequestNoOp(method: Method) {
     if (method.returnType != Void.TYPE) return
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
-    method.hookMethod {
-        before { param -> param.result = null }
-    }
+    hookBlockNull(method)
 }
 
 /**
  * Answers "there is no advertisement to serve" from a method whose whole job is to hand
- * one back.
+ * one back. A shape-restricted front for [hookBlockNull]; also used for Litho renders,
+ * where a null component makes Litho skip the unit.
  *
  * Distinct from [hookAdRequestNoOp], which only handles `void`: these methods
  * return a single feed-unit edge and already have a documented no-ad path — the vendor
@@ -1030,10 +1035,7 @@ fun hookAdRequestNoOp(method: Method) {
 fun hookNullAdResult(method: Method) {
     val returnType = method.returnType
     if (returnType == Void.TYPE || returnType.isPrimitive) return
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
-    method.hookMethod {
-        before { param -> param.result = null }
-    }
+    hookBlockNull(method)
 }
 
 /**
@@ -1081,16 +1083,18 @@ fun hookInstantGamesAdsLoader(classLoader: ClassLoader) {
  * The gates this is pointed at are the ones an ad pipeline asks before allocating a
  * slot, so answering "not eligible" removes the slot rather than emptying it.
  */
-fun hookForceBoolean(method: Method, value: Boolean = false) {
-    if (method.returnType != Boolean::class.javaPrimitiveType && method.returnType != Boolean::class.javaObjectType) return
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+fun hookForceBoolean(method: Method, value: Boolean = false): Boolean {
+    if (method.returnType != Boolean::class.javaPrimitiveType && method.returnType != Boolean::class.javaObjectType) return false
+    if (isUnsafeTarget(method) || !markHooked(method)) return false
+    method.isAccessible = true
     method.hookMethod {
         before { param -> param.result = value }
     }
+    return true
 }
 
 fun hookAdPluginListBuilder(method: Method) {
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    if (!markHooked(method)) return
     method.hookMethod {
         after { param ->
             val current = param.result as? Iterable<*> ?: return@after
@@ -1184,7 +1188,7 @@ fun hookReelsBannerRender(method: Method) {
 // ─── Hook installers – Sponsored pool ────────────────────────────────────────
 
 fun hookSponsoredPoolAdd(method: Method): Boolean {
-    if (!sponsoredPoolMethodsHooked.add(methodHookKey(method))) return false
+    if (!markHooked(method)) return false
     method.hookMethod {
         before { param -> param.result = false }
     }
@@ -1192,6 +1196,7 @@ fun hookSponsoredPoolAdd(method: Method): Boolean {
 }
 
 fun hookSponsoredStoryNext(method: Method) {
+    if (!markHooked(method)) return
     method.hookMethod {
         before { param -> param.result = null }
     }
@@ -2999,7 +3004,7 @@ private fun isAdOnlyVideoExtension(instance: Any): Boolean {
  */
 fun hookVideoViewerExtensionGate(method: Method) {
     if (method.returnType != Boolean::class.javaPrimitiveType) return
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    if (!markHooked(method)) return
     method.hookMethod {
         before { param ->
             val instance = param.thisObject ?: return@before
@@ -3009,32 +3014,10 @@ fun hookVideoViewerExtensionGate(method: Method) {
     }
 }
 
-// ─── Upstream FacebookAppAdsRemover hook actions ─────────────────────────────
-//
-// Used by SpoofAdFreeSession, HideReelsShopping and AggressiveAdBlocking. Nothing here names
-// an obfuscated class or member; every target comes from a DexKit fingerprint and the
-// installers only look at method shape.
-
-private val upstreamMethodsHooked = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
-
-private fun markHooked(method: Method): Boolean = upstreamMethodsHooked.add(methodHookKey(method))
-
-// ─── Safety filters (upstream AdFilterHook) ──────────────────────────────────
-
-/**
- * R8 centralises string constants into dispatch tables — `static String m(int)` with a giant
- * switch. An anchor string then resolves to the TABLE rather than to the real method, and
- * nulling its return corrupts every caller. Never hook one.
- */
 fun isStringDispatchTable(m: Method): Boolean =
     Modifier.isStatic(m.modifiers) && m.returnType == String::class.java &&
         m.parameterCount == 1 && m.parameterTypes[0] == Int::class.javaPrimitiveType
 
-/**
- * The native library loader must never be swept. SoLoader's merged-library table NAMES every
- * native library, ad ones included, so a string anchor can land on it; replacing its
- * boolean `loadLibrary` made Facebook unable to start at all (upstream incident, 578).
- */
 private val LOADER_INFRA_PREFIXES = listOf("com.facebook.soloader.")
 private val LOADER_INFRA_METHODS = setOf("loadLibrary", "loadLibraryUnsafe")
 
@@ -3044,7 +3027,6 @@ private fun isUnsafeTarget(m: Method): Boolean =
     isStringDispatchTable(m) || isLoaderInfra(m.declaringClass.name) || m.name in LOADER_INFRA_METHODS ||
         Modifier.isAbstract(m.modifiers)
 
-/** Returning null from a primitive-returning method crashes; substitute defaults. */
 private fun nullResultFor(returnType: Class<*>): Any? = when (returnType) {
     java.lang.Boolean.TYPE -> false
     java.lang.Integer.TYPE -> 0
@@ -3057,9 +3039,6 @@ private fun nullResultFor(returnType: Class<*>): Any? = when (returnType) {
     else -> null
 }
 
-// ─── Hook actions (upstream HookAction) ──────────────────────────────────────
-
-/** BLOCK_NULL — skip the original, return null or a primitive-safe default. */
 fun hookBlockNull(method: Method): Boolean {
     if (isUnsafeTarget(method) || !markHooked(method)) return false
     method.isAccessible = true
@@ -3068,38 +3047,13 @@ fun hookBlockNull(method: Method): Boolean {
     return true
 }
 
-/** BLOCK_FALSE — skip the original, return false. Only for boolean methods. */
-fun hookBlockFalse(method: Method): Boolean {
-    if (method.returnType != java.lang.Boolean.TYPE && method.returnType != java.lang.Boolean::class.java) return false
-    if (isUnsafeTarget(method) || !markHooked(method)) return false
-    method.isAccessible = true
-    method.hookMethod { before { param -> param.result = false } }
-    return true
-}
-
-/** Forces a boolean getter to TRUE (ad-free session spoof). */
-fun hookForceTrue(method: Method): Boolean {
-    if (method.returnType != java.lang.Boolean.TYPE) return false
-    if (!markHooked(method)) return false
-    method.isAccessible = true
-    method.hookMethod { before { param -> param.result = true } }
-    return true
-}
-
-// ─── Banner sweep (upstream AdFilterHook.installBannerScan) ──────────────────
-
-/**
- * BLOCK_FALSE for one boolean method of a banner-ad class. Mirrors upstream's guards: never
- * `equals` (breaks HashMap lookups app-wide), never synthetic/bridge, never the loader.
- */
 fun hookBannerBoolean(method: Method): Boolean {
     if (method.returnType != java.lang.Boolean.TYPE || method.parameterCount < 1) return false
     if (method.name == "equals" && method.parameterCount == 1) return false
     if (method.isSynthetic || method.isBridge) return false
-    return hookBlockFalse(method)
+    return hookForceBoolean(method, false)
 }
 
-/** SPONSORED_NULL — null the call only when the receiver or an argument is a sponsored story. */
 fun hookSponsoredNull(method: Method): Boolean {
     if (isUnsafeTarget(method) || !markHooked(method)) return false
     method.isAccessible = true
@@ -3114,11 +3068,6 @@ fun hookSponsoredNull(method: Method): Boolean {
     return true
 }
 
-/**
- * RECEIVER_SPONSORED_NULL — null only when the receiver's own toString says "SPONSORED".
- * Used on the Shorts mid-card unit's type-node getter, a bare TreeJNI wrapper whose
- * toString is a dump of the unit.
- */
 fun hookReceiverSponsoredNull(method: Method): Boolean {
     if (isUnsafeTarget(method) || !markHooked(method)) return false
     method.isAccessible = true
@@ -3133,14 +3082,6 @@ fun hookReceiverSponsoredNull(method: Method): Boolean {
     return true
 }
 
-// ─── Sponsored-data check (upstream AdFilterHook.SponsoredCheck) ─────────────
-
-/**
- * True when an object is — or directly wraps — a TreeJNI story whose `sponsored_data` field
- * is set. Uses `hasFieldValue(FIELD_NAME_HASH_CODE_sponsored_data)`: the hash constant is
- * read off `GraphQLPartialStory` (a real, unobfuscated class) rather than pinned, and
- * `hasFieldValue` is TreeJNI's own public API, so no obfuscated getter is involved.
- */
 object SponsoredDataCheck {
     private const val PARTIAL_STORY = "com.facebook.graphql.model.GraphQLPartialStory"
 
@@ -3218,20 +3159,6 @@ object SponsoredDataCheck {
     }
 }
 
-// ─── Newsfeed processNewStories filter (upstream NewsfeedFilterHook) ─────────
-
-/**
- * Hooks the `processNewStories` Runnable's `run()` (found by its "Added stories to FUC"
- * literal) and drops every new-story edge whose GraphQLFeedStoryCategory is SPONSORED
- * before `run()` sees the collection — the classic feed pipeline's own entry point.
- *
- * Only the SPONSORED category is ported: upstream's other categories (Threads, Reels,
- * suggestions…) are content filters, not ads, and are off by default there.
- *
- * All members are located by shape: the holder field is the one whose value declares an
- * ImmutableCollection field, and the category getter is the edge's 0-arg method returning
- * an enum that carries SPONSORED/PROMOTION constants.
- */
 private val holderFieldCache = ConcurrentHashMap<Class<*>, java.util.Optional<Field>>()
 private val collectionFieldCache = ConcurrentHashMap<Class<*>, java.util.Optional<Field>>()
 private val edgeCategoryGetterCache = ConcurrentHashMap<Class<*>, java.util.Optional<Method>>()
@@ -3321,23 +3248,8 @@ private fun edgeCategoryOf(edge: Any): String? {
     return (runCatching { getter.invoke(edge) }.getOrNull() as? Enum<*>)?.name
 }
 
-// ─── Litho feed component guard (upstream FeedGuardHook) ─────────────────────
-
-/** Litho layout entry-point arities seen across builds (A1F/A1H on 576). */
 private val FEED_RENDER_PARAMETER_COUNTS = listOf(1, 2)
 
-/**
- * Cached feed rows render through Litho components whose spec names survive obfuscation as
- * string constants ("NewsFeedFeedUnitComponent" and the generic "LoggingComponent"
- * wrapper). The component holds the GraphQLFeedUnitEdge; when that edge is DEFINITELY
- * sponsored, the render/layout method returns null and Litho skips the row.
- *
- * Pairs are matched structurally: the component declares an edge field, the wrapper a child
- * field typed as the component, and both share a Litho layout context type. Render methods
- * are matched by shape because their names rotate every build.
- *
- * @return the number of render methods newly hooked
- */
 fun installFeedComponentGuard(
     components: Collection<Class<*>>,
     wrappers: Collection<Class<*>>,
@@ -3382,7 +3294,6 @@ fun installFeedComponentGuard(
     return installed
 }
 
-/** Static builder factories share the layout shape — only instance methods are hooked. */
 private fun lithoLayoutMethods(type: Class<*>, contextType: Class<*>, parameterCount: Int): List<Method> =
     type.declaredMethods.filter { m ->
         !m.isStatic && m.parameterCount == parameterCount && !m.returnType.isPrimitive &&
@@ -3418,39 +3329,22 @@ private fun declaresFeedStoryCategoryAccessor(type: Class<*>): Boolean = runCatc
     }
 }.getOrDefault(false)
 
-// ─── Marketplace (upstream MarketplaceAdsHook) ────────────────────────────────
-
-/** Organic feed queries whose variables get the ad-skip rewrite. */
 private val MARKETPLACE_FEED_QUERY_NAMES = setOf(
     "MarketplaceHomeFeedQueryRendererQuery",
     "MarketplaceHomeFeedPaginationQuery",
 )
 
-/** Ad-only queries dropped outright. */
 private val MARKETPLACE_ADS_QUERY_MARKERS = listOf(
     "MarketplaceHomeFeedAds",
     "MarketplaceHomeFeedBoostedListingAds",
     "MarketplaceHomeFeedThemedAds",
 )
 
-/** Server-honoured ad-skip flags in the feed query's variables JSON. */
 private val MARKETPLACE_AD_SKIP_FLAGS = listOf("shouldSkipAdRequest", "shouldSkipBoostedListingAdRequest")
 
 private val marketplaceQueryNameRegex = Regex("query[\\s]+([A-Za-z0-9_]+)")
 private val marketplaceFriendlyNameRegex = Regex("fb_api_req_friendly_name=([A-Za-z0-9_]+)")
 
-/** Render block: returning null from a Litho render/layout makes it skip the sponsored unit. */
-fun hookRenderNull(method: Method): Boolean {
-    if (method.returnType.isPrimitive || method.returnType == Void.TYPE) return false
-    return hookBlockNull(method)
-}
-
-/**
- * The React Native Networking module's `sendRequest` (it keeps its RN name because JS calls
- * it reflectively). Ad-only marketplace queries are dropped (void → the request never
- * leaves), and the organic home-feed queries get their server-honoured ad-skip flags set,
- * so the server itself omits the sponsored tiles.
- */
 fun hookMarketplaceSendRequest(method: Method): Boolean {
     if (method.returnType != Void.TYPE || method.parameterCount < 5 || !markHooked(method)) return false
     method.isAccessible = true
@@ -3497,7 +3391,6 @@ private fun rewriteMarketplaceFeedVariables(body: String): String? {
     return body.substring(0, valueStart) + URLEncoder.encode(variables.toString(), "UTF-8") + body.substring(valueEnd)
 }
 
-/** RN's WritableNativeMap is public API with a no-arg constructor and putString. */
 private fun readableMapWithString(original: Any?, body: String): Any? {
     if (original == null) return null
     return runCatching {

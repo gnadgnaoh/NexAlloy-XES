@@ -7,6 +7,10 @@ import io.github.nexalloy.revanced.facebook.ad.HideProfileTimelineAds
 import io.github.nexalloy.revanced.facebook.ad.HideReelsShopping
 import io.github.nexalloy.revanced.facebook.ad.HideSearchAds
 import io.github.nexalloy.revanced.facebook.ad.SpoofAdFreeSession
+import io.github.nexalloy.revanced.facebook.link.CleanLinks
+import io.github.nexalloy.revanced.facebook.privacy.AllowScreenCapture
+import io.github.nexalloy.revanced.facebook.privacy.BlockScreenCaptureDetection
+import io.github.nexalloy.revanced.facebook.privacy.HideSeenStory
 
 val FacebookPatches = arrayOf(
     HideFacebookAds,
@@ -16,4 +20,8 @@ val FacebookPatches = arrayOf(
     SpoofAdFreeSession,
     HideReelsShopping,
     AggressiveAdBlocking,
+    HideSeenStory,
+    AllowScreenCapture,
+    BlockScreenCaptureDetection,
+    CleanLinks,
 )
