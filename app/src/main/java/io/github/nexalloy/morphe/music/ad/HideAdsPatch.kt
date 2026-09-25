@@ -23,6 +23,8 @@ val HideAds = patch(
         SwitchPreference("morphe_music_hide_video_ads"),
     )
 
+    // TODO addLithoFilter(ADS_FILTER)
+
     // Hide 'Get Music Premium' label
     HideGetPremiumFingerprint.hookMethod {
         val id = ResourceUtils.getIdIdentifier("unlimited_panel")
