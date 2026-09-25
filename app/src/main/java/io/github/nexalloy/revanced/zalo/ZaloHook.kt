@@ -19,6 +19,7 @@ import io.github.nexalloy.revanced.zalo.privacy.BlockSeenStatus
 import io.github.nexalloy.revanced.zalo.privacy.BlockTypingStatus
 import io.github.nexalloy.revanced.zalo.telemetry.DisableCrashlytics
 import io.github.nexalloy.revanced.zalo.tracking.DisableAdsTracking
+import io.github.nexalloy.revanced.zalo.backup.EnableDrivePhotoBackup
 
 val ZaloPatches = arrayOf<Patch>(
     HideFeedZInstantAds,
@@ -39,4 +40,5 @@ val ZaloPatches = arrayOf<Patch>(
     BlockTypingStatus,
     PreferOriginalPhotoQuality,
     KeepExpiredMediaAccessible,
+    EnableDrivePhotoBackup,
 )
