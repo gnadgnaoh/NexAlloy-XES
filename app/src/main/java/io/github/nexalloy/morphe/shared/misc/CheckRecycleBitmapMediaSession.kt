@@ -7,10 +7,14 @@ import de.robv.android.xposed.XposedBridge
 import io.github.nexalloy.callStaticMethod
 import io.github.nexalloy.patch
 import io.github.nexalloy.hookMethod
+import io.github.nexalloy.morphe.shared.misc.fix.bitmap.fixRecycledBitmapPatch
 import org.luckypray.dexkit.wrap.DexMethod
 import java.lang.reflect.Member
 
 val CheckRecycleBitmapMediaSession = patch(name = "<CheckRecycleBitmapMediaSession>") {
+
+    dependsOn(fixRecycledBitmapPatch)
+
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@patch
 
     if (runCatching { DexMethod("Landroid/media/MediaMetadata\$Builder;->calculateSampleSize(IIII)I").toMember() }.isSuccess) {

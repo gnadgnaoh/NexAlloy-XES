@@ -41,8 +41,11 @@ val SettingsHook = patch(
     preferences += NonInteractivePreference(
         key = "morphe_settings_music_screen_0_about",
         summaryKey = null,
+        icon = "@drawable/morphe_settings_screen_00_about",
+        iconBold = "@drawable/morphe_settings_screen_00_about_bold",
+        layout = "@layout/morphe_preference_with_icon",
         tag = MorpheAboutPreference::class.java,
-        selectable = true,
+        selectable = true
     )
 
     PreferenceScreen.GENERAL.addPreferences(
@@ -86,16 +89,32 @@ val SettingsHook = patch(
 
 object PreferenceScreen : BasePreferenceScreen() {
     val ADS = Screen(
-        "morphe_settings_music_screen_1_ads", summaryKey = null
+        key = "morphe_settings_music_screen_1_ads",
+        summaryKey = null,
+        icon = "@drawable/morphe_settings_screen_01_ads",
+        iconBold = "@drawable/morphe_settings_screen_01_ads_bold",
+        layout = "@layout/morphe_preference_with_icon"
     )
     val GENERAL = Screen(
-        "morphe_settings_music_screen_2_general", summaryKey = null
+        key = "morphe_settings_music_screen_3_general",
+        summaryKey = null,
+        icon = "@drawable/morphe_settings_screen_04_general",
+        iconBold = "@drawable/morphe_settings_screen_04_general_bold",
+        layout = "@layout/morphe_preference_with_icon"
     )
     val PLAYER = Screen(
-        "morphe_settings_music_screen_3_player", summaryKey = null
+        key = "morphe_settings_music_screen_4_player",
+        summaryKey = null,
+        icon = "@drawable/morphe_settings_screen_05_player",
+        iconBold = "@drawable/morphe_settings_screen_05_player_bold",
+        layout = "@layout/morphe_preference_with_icon"
     )
     val MISC = Screen(
-        "morphe_settings_music_screen_4_misc", summaryKey = null
+        key = "morphe_settings_music_screen_9_misc",
+        summaryKey = null,
+        icon = "@drawable/morphe_settings_screen_11_misc",
+        iconBold = "@drawable/morphe_settings_screen_11_misc_bold",
+        layout = "@layout/morphe_preference_with_icon"
     )
 
     override fun commit(screen: PreferenceScreenPreference) {

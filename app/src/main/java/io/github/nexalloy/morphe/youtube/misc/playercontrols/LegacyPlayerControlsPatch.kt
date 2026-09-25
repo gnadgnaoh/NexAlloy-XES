@@ -47,10 +47,16 @@ fun addLegacyBottomControl(layout: Int) {
 private var newPlayerControlsOverride = false
 
 internal fun disableNewPlayerControlsFeatureFlag() {
-    if (!is_21_04_or_greater || newPlayerControlsOverride) return
+    if (newPlayerControlsOverride) return
     newPlayerControlsOverride = true
 
-    insertLiteralOverride(45752335L)
+    if (is_20_31_or_greater) {
+        insertLiteralOverride(45698813, LegacyPlayerControlsPatch::forcePlayerSeekbar)
+    }
+
+    if (is_21_04_or_greater) {
+        insertLiteralOverride(45752335L)
+    }
 }
 
 fun initializeTopControl(control: ControlInitializer) {

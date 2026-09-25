@@ -29,11 +29,13 @@ class NonInteractivePreference(
     layout: String? = null,
     tag: Class<out Preference> = Preference::class.java,
     val selectable: Boolean = false,
+    val dependency: String? = null,
 ) : BasePreference(key, titleKey, summaryKey, icon, iconBold, layout, tag) {
 
     override fun build(ctx: Context, prefMgr: PreferenceManager): Preference {
         return super.build(ctx, prefMgr).apply {
             isSelectable = selectable
+            this@NonInteractivePreference.dependency?.let { dependency = it }
         }
     }
 }
