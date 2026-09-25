@@ -5,6 +5,8 @@ import io.github.nexalloy.morphe.findMethodListDirect
 import io.github.nexalloy.morphe.fingerprint
 import io.github.nexalloy.revanced.zalo.ZaloFeedKeys
 import org.luckypray.dexkit.query.enums.StringMatchType
+import org.luckypray.dexkit.result.MethodData
+import java.lang.reflect.Modifier
 
 val feedAdsBindFingerprint = fingerprint {
     strings("zinstantMediaType")
@@ -60,3 +62,23 @@ val advertisingItemFingerprints = findMethodListDirect {
         }
     }
 }
+
+internal const val STORY_ADS_ENABLE_KEY = "social@story@story_ads@enable"
+internal const val COMMUNITY_ADS_ENABLE_KEY = "community.community_ads.enable"
+
+val remoteConfigIntGetterFingerprint = findMethodDirect {
+    fun configGettersCalledBy(key: String): Set<String> =
+        findMethod { matcher { usingEqStrings(key) } }
+            .map { site ->
+                site.invokes.filter { it.isStaticStringIntToInt() }.map { it.descriptor }.toSet()
+            }
+            .reduce { acc, next -> acc intersect next }
+
+    val descriptor = (configGettersCalledBy(STORY_ADS_ENABLE_KEY) intersect
+        configGettersCalledBy(COMMUNITY_ADS_ENABLE_KEY)).single()
+    getMethodData(descriptor)!!
+}
+
+private fun MethodData.isStaticStringIntToInt() =
+    isMethod && Modifier.isStatic(modifiers) &&
+        paramTypeNames == listOf("java.lang.String", "int") && returnTypeName == "int"
