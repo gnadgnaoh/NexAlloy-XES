@@ -623,18 +623,18 @@ object StoryDownloadHook {
         var i = 0
         while (i < url.length) {
             // Find a digit run
-            if (!Character.isDigit(url[i])) {
+            if (!url[i].isDigit()) {
                 i++
                 continue
             }
             val numStart = i
-            while (i < url.length && Character.isDigit(url[i])) i++
+            while (i < url.length && url[i].isDigit()) i++
             // Must be followed by 'x'
             if (i >= url.length || url[i] != 'x') continue
             i++ // skip 'x'
-            if (i >= url.length || !Character.isDigit(url[i])) continue
+            if (i >= url.length || !url[i].isDigit()) continue
             val numMid = i
-            while (i < url.length && Character.isDigit(url[i])) i++
+            while (i < url.length && url[i].isDigit()) i++
             try {
                 val w = url.substring(numStart, numMid - 1).toInt()
                 val h = url.substring(numMid, i).toInt()

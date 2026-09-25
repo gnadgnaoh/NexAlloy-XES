@@ -56,7 +56,7 @@ object PostDownloadContextMenuHook {
     // ── Guards ────────────────────────────────────────────────────────────────
 
     private val sAddingDownload: ThreadLocal<Boolean> =
-        ThreadLocal.withInitial { java.lang.Boolean.FALSE }
+        ThreadLocal.withInitial { false }
 
     private val processedCreators: MutableSet<Any> =
         Collections.newSetFromMap(WeakHashMap())

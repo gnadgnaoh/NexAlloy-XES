@@ -5,6 +5,7 @@ import io.github.nexalloy.morphe.twitter.ads.timelineEntryHook.HideAds
 import io.github.nexalloy.morphe.twitter.ads.timelineEntryHook.HideRecommendationItems
 import io.github.nexalloy.morphe.twitter.link.unshorten.NoShortenedUrl
 import io.github.nexalloy.morphe.twitter.misc.blur.DisableBlur
+import io.github.nexalloy.morphe.twitter.premium.downloads.UnlockDownloads
 import io.github.nexalloy.morphe.twitter.timeline.forceTranslate.ForceTranslate
 import io.github.nexalloy.morphe.twitter.timeline.removePremiumUpsell.RemovePremiumUpsell
 import io.github.nexalloy.morphe.twitter.timeline.showpollresults.ShowPollResults
@@ -20,6 +21,7 @@ val TwitterPatches: Array<Patch> = arrayOf(
 
     // Premium
     RemovePremiumUpsell,
+    UnlockDownloads,
 
     // Timeline / video
     ForceTranslate,

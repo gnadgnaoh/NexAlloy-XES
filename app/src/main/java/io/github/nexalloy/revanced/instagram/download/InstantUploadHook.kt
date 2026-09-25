@@ -432,7 +432,7 @@ class InstantUploadHook {
                     val rc = record.javaClass
                     val paused = rc.getDeclaredField("paused")
                     paused.isAccessible = true
-                    if (java.lang.Boolean.FALSE == paused.get(record)) {
+                    if (paused.get(record) == false) {
                         val af = rc.getDeclaredField("activity")
                         af.isAccessible = true
                         return af.get(record) as Activity?
