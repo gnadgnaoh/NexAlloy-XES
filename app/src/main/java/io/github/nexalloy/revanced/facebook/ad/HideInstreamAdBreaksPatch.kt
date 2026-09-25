@@ -2,6 +2,8 @@ package io.github.nexalloy.revanced.facebook.ad
 
 import io.github.nexalloy.patch
 import io.github.nexalloy.revanced.facebook.hookAdRequestNoOp
+import io.github.nexalloy.revanced.facebook.hookForceBoolean
+import io.github.nexalloy.revanced.facebook.hookBlockNull
 import io.github.nexalloy.revanced.facebook.hookNullAdResult
 import io.github.nexalloy.revanced.facebook.hookVideoViewerExtensionGate
 
@@ -30,4 +32,12 @@ val HideInstreamAdBreaks = patch(
 
     runCatching { ::wasLiveAdBreakControlRenderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
         .forEach { dm -> runCatching { hookNullAdResult(dm.toMethod()) } }
+
+    // ── 4. Upstream video-ads installer ──────────────────────────────
+
+    runCatching { ::videoAdBlockMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
+
+    runCatching { ::tapToFullscreenAdFetchFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookForceBoolean(dm.toMethod(), false) } }
 }
