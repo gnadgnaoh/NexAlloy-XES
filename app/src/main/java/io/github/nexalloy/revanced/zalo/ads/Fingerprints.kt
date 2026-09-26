@@ -82,3 +82,16 @@ val remoteConfigIntGetterFingerprint = findMethodDirect {
 private fun MethodData.isStaticStringIntToInt() =
     isMethod && Modifier.isStatic(modifiers) &&
         paramTypeNames == listOf("java.lang.String", "int") && returnTypeName == "int"
+
+internal const val ZINSTANT_AD_ITEM_VIEW_CLASS = "com.zing.zalo.ui.widget.ZinstantAdItemView"
+private const val MESSAGES_VIEW_CLASS = "com.zing.zalo.ui.maintab.msg.MessagesView"
+
+val zinstantAdItemBindFingerprint = findMethodDirect {
+    findMethod {
+        matcher {
+            declaredClass = ZINSTANT_AD_ITEM_VIEW_CLASS
+            returnType = "void"
+            paramCount = 3
+        }
+    }.single { it.paramTypeNames.drop(1) == listOf(MESSAGES_VIEW_CLASS, "boolean") }
+}
