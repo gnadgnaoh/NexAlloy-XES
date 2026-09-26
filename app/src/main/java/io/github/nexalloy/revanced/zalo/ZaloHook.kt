@@ -12,7 +12,7 @@ import io.github.nexalloy.revanced.zalo.adtima.DisableAdtimaOfflineAdsAndTrackin
 import io.github.nexalloy.revanced.zalo.adtima.DisableAdtimaVideoAdRequests
 import io.github.nexalloy.revanced.zalo.adtima.OptOutAdtimaAdTracking
 import io.github.nexalloy.revanced.zalo.adtima.RemoveAdtimaGoogleNetworks
-import io.github.nexalloy.revanced.zalo.calls.AutoRecordCalls
+import io.github.nexalloy.revanced.zalo.call.AutoRecordCalls
 import io.github.nexalloy.revanced.zalo.media.KeepExpiredMediaAccessible
 import io.github.nexalloy.revanced.zalo.media.PreferOriginalPhotoQuality
 import io.github.nexalloy.revanced.zalo.privacy.BlockSeenStatus
