@@ -2,14 +2,25 @@ package io.github.nexalloy.revanced.zalo.media
 
 import app.morphe.extension.shared.Logger
 import de.robv.android.xposed.XC_MethodReplacement
+import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
+import io.github.nexalloy.revanced.zalo.ads.remoteConfigIntGetterFingerprint
 import java.lang.reflect.Modifier
+
+private const val ALLOW_SEND_ORIGINAL_KEY = "media_picker@pick_quality@allow_send_original_photo"
+
+private val FORCED_TRUE_EXTRAS = setOf(
+    "bol_extra_photo_hd",
+    "bol_extra_photo_original",
+)
 
 val PreferOriginalPhotoQuality = patch(
     name = "Prefer original photo quality",
-    description = "Sends photos in Zalo's existing Original quality by default and skips the " +
-        "client-side Z Cloud entitlement check. Server upload limits, account restrictions " +
-        "and video quality are unchanged.",
+    description = "Sends photos in Zalo's existing Original quality by default, including " +
+        "photos shared in from other apps, and skips " +
+        "the client-side Z Cloud entitlement check. Photos taken with the in-app Zalo " +
+        "camera stay HD. Server upload limits, account restrictions and video quality " +
+        "are unchanged.",
 ) {
     val qualityEnum = ::mediaQualityEnumFingerprint.clazz
     val original = qualityValue(qualityEnum, QUALITY_ORIGINAL)
@@ -54,6 +65,22 @@ val PreferOriginalPhotoQuality = patch(
             if (!label.isNullOrEmpty()) param.args[0] = label
         }
     }
+
+    ::remoteConfigIntGetterFingerprint.hookMethod {
+        before { param ->
+            if (param.args.getOrNull(0) == ALLOW_SEND_ORIGINAL_KEY) param.result = 1
+        }
+    }
+
+    android.os.BaseBundle::class.java.declaredMethods
+        .filter { it.name == "getBoolean" && it.parameterTypes.firstOrNull() == String::class.java }
+        .forEach { method ->
+            method.hookMethod {
+                before { param ->
+                    if (param.args[0] in FORCED_TRUE_EXTRAS) param.result = true
+                }
+            }
+        }
 
     Logger.printInfo { "[Zalo] Prefer original photo quality: ORIGINAL=$original HD=$hd" }
 }
