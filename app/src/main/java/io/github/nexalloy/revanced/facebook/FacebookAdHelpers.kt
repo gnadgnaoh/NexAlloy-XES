@@ -7,6 +7,8 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebView
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
@@ -164,18 +166,25 @@ const val QUICKSILVER_ADS_RESET_METHOD  = "resetInstantGamesAdsModuleLoadState"
 
 const val GAME_AD_REJECTION_MESSAGE   = "Game ad request blocked"
 const val GAME_AD_REJECTION_CODE      = "CLIENT_UNSUPPORTED_OPERATION"
-const val GAME_AD_UNAVAILABLE_MESSAGE = "Rewarded ad unavailable"
-const val GAME_AD_UNAVAILABLE_CODE    = "ADS_UNAVAILABLE"
 
 val GAME_AD_MESSAGE_TYPES = setOf(
     "getinterstitialadasync", "getrewardedvideoasync", "getrewardedinterstitialasync",
     "loadadasync", "showadasync", "loadbanneradasync", "hidebanneradasync"
 )
 
-/** Only these types are auto-fixed (banner/hide); rewarded/interstitial get ADS_UNAVAILABLE. */
-val GAME_AD_AUTOFIX_MESSAGE_TYPES = setOf("loadbanneradasync", "hidebanneradasync")
+/**
+ * Upstream FacebookAppAdsRemover 1.21: rewarded AND banner lifecycle messages are resolved
+ * as SUCCESS instead of "unavailable", so the game grants the reward without an ad ever
+ * rendering. (The former NexAlloy strategy answered rewarded requests with ADS_UNAVAILABLE,
+ * which most games treat as "no reward".) Reward-flavoured loadadasync/showadasync calls are
+ * forced to success as well — see [shouldForceGameAdSuccess].
+ */
+val GAME_AD_AUTOFIX_MESSAGE_TYPES = setOf(
+    "getrewardedvideoasync", "getrewardedinterstitialasync",
+    "loadbanneradasync", "hidebanneradasync"
+)
 
-val GAME_AD_UNAVAILABLE_MESSAGE_TYPES = setOf("getrewardedvideoasync", "getrewardedinterstitialasync")
+val GAME_AD_REWARD_MESSAGE_TYPES = setOf("getrewardedvideoasync", "getrewardedinterstitialasync")
 
 val GAME_AD_ACTIVITY_CLASS_NAMES = setOf(
     AUDIENCE_NETWORK_ACTIVITY_CLASS,
@@ -267,8 +276,14 @@ val gameAdInstanceTypes  = ConcurrentHashMap<String, String>()
 val gameAdPromiseSnapshots = ConcurrentHashMap<String, GameAdPromiseSnapshot>()
 val recentGameAdTargets  = Collections.synchronizedMap(WeakHashMap<Any, Long>())
 val recentGameAdPayloads = Collections.synchronizedList(ArrayList<GameAdPayloadSnapshot>())
-private val gameAdResultHooksInstalled         = AtomicInteger(0)
-private val gameAdServiceDispatchHooksInstalled = AtomicInteger(0)
+/** Per-class guards: every bridge class (DexKit-found or registered at runtime through
+ *  addJavascriptInterface) gets its own result/dispatch hooks, exactly once. */
+private val gameAdResultHookedClasses          = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+private val gameAdServiceDispatchHookedClasses = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+/** Request / bridge-entry methods already hooked (DexKit bridge + runtime delegates). */
+private val gameAdMethodsHooked                = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+private val gameAdJavascriptWatcherInstalled   = AtomicInteger(0)
+private val gameAdScriptDeliveryHooksInstalled = AtomicInteger(0)
 private val gameAdSurfaceHooksInstalled        = AtomicInteger(0)
 private val audienceNetworkRewardHooksInstalled = AtomicInteger(0)
 private val audienceNetworkRewardClassesHooked  = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
@@ -291,7 +306,6 @@ private val audienceNetworkRewardAdListeners    = Collections.synchronizedMap(We
 private val scheduledGameAdActivityCloses       = Collections.synchronizedMap(WeakHashMap<Activity, Long>())
 private val scheduledAudienceNetworkExitViews   = Collections.synchronizedMap(WeakHashMap<View, Long>())
 private val lastGameAdActivityCloseMs    = AtomicLong(0L)
-private val lastUnavailableGameAdMs      = AtomicLong(0L)
 private val marketplaceAdsPackCache      = ConcurrentHashMap<String, Boolean>()
 
 // ─── Data classes ─────────────────────────────────────────────────────────────
@@ -1369,113 +1383,302 @@ fun hookStoryAdProvider(provider: StoryAdProviderHooks) {
 }
 
 // ─── Hook installers – Game ads ───────────────────────────────────────────────
+//
+// Synced with upstream FacebookAppAdsRemover 1.21 (GameAdsHook). The request, bridge and
+// service-dispatch hooks share one flow:
+//
+//   remember the payload (promise snapshot)
+//   → not a message we force to success?  let the original run
+//   → resolve the promise as success       (reward granted, no ad rendered)
+//   → else reject it outright
+//   → else let the original run
+//
+// Deliberately NOT ported from upstream: its always-on ViewGroup.addView surface watcher
+// and its global Activity.onResume sweep. Those correspond to NexAlloy's
+// hookGlobalGameAdSurfaceFallbacks / hookGlobalGameAdActivityLifecycleFallback, which stay
+// disabled in HideFacebookAdsPatch for battery reasons.
 
+private fun hookGameAdHandler(method: Method, handler: (XC_MethodHook.MethodHookParam) -> Unit): Boolean {
+    if (!gameAdMethodsHooked.add(methodHookKey(method))) return false
+    method.isAccessible = true
+    method.hookMethod { before { param -> handler(param) } }
+    return true
+}
+
+/**
+ * Shared resolve-or-reject tail. Returns true when the original call must be skipped.
+ */
+private fun settleGameAdMessage(target: Any?, payload: Any, messageType: String?): Boolean {
+    rememberGameAdPayload(target, payload, messageType)
+    if (!shouldForceGameAdSuccess(payload, messageType)) return false
+    if (resolveGameAdPayload(target, payload, messageType)) {
+        dispatchPostResolveGameAdSignals(target, payload, messageType)
+        return true
+    }
+    return rejectGameAdPayload(target, payload)
+}
+
+/** Native request handler: void(JSONObject). */
 fun hookGameAdRequest(method: Method) {
-    method.hookMethod {
-        before { param ->
-            val payload = param.args.getOrNull(0) ?: return@before
-            val messageType = inferGameAdMessageType(method, payload)
-            rememberGameAdPayload(param.thisObject, payload, messageType)
-            if (rejectUnavailableGameAdPayloadIfNeeded(param.thisObject, payload, messageType, "request ${method.declaringClass.name}.${method.name}")) { param.result = null; return@before }
-            if (!shouldAutofixGameAdMessage(messageType)) return@before
-            if (resolveGameAdPayload(param.thisObject, payload, messageType)) {
-                dispatchPostResolveGameAdSignals(param.thisObject, payload, messageType)
-                param.result = null
-            } else if (rejectGameAdPayload(param.thisObject, payload)) {
-                param.result = null
-            }
-        }
+    hookGameAdHandler(method) { param ->
+        val payload = param.args.getOrNull(0) ?: return@hookGameAdHandler
+        if (settleGameAdMessage(param.thisObject, payload, inferGameAdMessageType(payload))) param.result = null
     }
 }
 
+/** JS bridge entry: (String message[, …]). Parsed and gated on the payload's game-ad "type". */
 fun hookGameAdBridge(method: Method) {
-    method.hookMethod {
-        before { param ->
-            val raw = param.args.getOrNull(0) as? String ?: return@before
-            val payload = runCatching { JSONObject(raw) }.getOrNull() ?: return@before
-            val type = payload.optString("type"); if (type !in GAME_AD_MESSAGE_TYPES) return@before
-            rememberGameAdPayload(param.thisObject, payload, type)
-            if (rejectUnavailableGameAdPayloadIfNeeded(param.thisObject, payload, type, "bridge ${method.declaringClass.name}.${method.name}")) { param.result = null; return@before }
-            if (!shouldAutofixGameAdMessage(type)) return@before
-            if (resolveGameAdPayload(param.thisObject, payload, type)) {
-                dispatchPostResolveGameAdSignals(param.thisObject, payload, type)
-                param.result = null
-            } else if (rejectGameAdPayload(param.thisObject, payload)) {
-                param.result = null
-            }
-        }
+    hookGameAdHandler(method) { param ->
+        val raw = param.args.getOrNull(0) as? String ?: return@hookGameAdHandler
+        // Cheap pre-filter before JSON parsing: every game-ad message type ends in "async".
+        // Runtime delegates registered via addJavascriptInterface are not all game bridges,
+        // so this keeps unrelated high-frequency JS traffic off the JSON parser.
+        if (!raw.contains("async")) return@hookGameAdHandler
+        val payload = runCatching { JSONObject(raw) }.getOrNull() ?: return@hookGameAdHandler
+        val type = payload.optString("type")
+        if (type !in GAME_AD_MESSAGE_TYPES) return@hookGameAdHandler
+        if (settleGameAdMessage(param.thisObject, payload, type)) param.result = null
     }
 }
 
-/** Hook resolve/reject methods on the bridge class for deeper interception. */
+/**
+ * Promise helpers on the bridge class: resolve(promiseId, value) gets its value forced to
+ * success; reject(promiseId, reason…) and the (String, String, JSONObject) bridge variant
+ * are converted into an original-pipeline resolve with a success payload.
+ */
 fun hookGameAdResultMethods(bridgeClass: Class<*>) {
-    if (!gameAdResultHooksInstalled.compareAndSet(0, 1)) return
+    if (!gameAdResultHookedClasses.add(bridgeClass.name)) return
     val resolveMethod = resolveGameAdResolveMethod(bridgeClass)
     val rejectMethod  = resolveGameAdRejectMethod(bridgeClass)
     val bridgeRejectMethod = resolveGameAdBridgeRejectMethod(bridgeClass)
 
     resolveMethod?.let { m ->
-        m.hookMethod {
-            before { param ->
-                val promiseId = param.args.getOrNull(0) as? String ?: return@before
-                val snapshot = gameAdPromiseSnapshots[promiseId] ?: return@before
-                if (snapshot.messageType !in GAME_AD_MESSAGE_TYPES) return@before
-                if (!shouldAutofixGameAdMessage(snapshot.messageType)) return@before
-                val original = param.args.getOrNull(1)
-                param.args[1] = forceGameAdSuccessResult(promiseId, original, snapshot.payload, snapshot.messageType)
+        runCatching {
+            m.hookMethod {
+                before { param ->
+                    val promiseId = param.args.getOrNull(0) as? String ?: return@before
+                    val snapshot = gameAdPromiseSnapshots[promiseId] ?: return@before
+                    if (snapshot.messageType !in GAME_AD_MESSAGE_TYPES) return@before
+                    if (!shouldForceGameAdSuccess(snapshot.payload, snapshot.messageType)) return@before
+                    param.args[1] = forceGameAdSuccessResult(promiseId, param.args.getOrNull(1), snapshot.payload, snapshot.messageType)
+                }
             }
         }
     }
 
     if (rejectMethod != null && resolveMethod != null) {
-        rejectMethod.hookMethod {
-            before { param ->
-                val promiseId = param.args.getOrNull(0) as? String ?: return@before
-                val reason = param.args.drop(1).joinToString(" ") { it?.toString().orEmpty() }
-                if (!shouldConvertGameAdRejectToSuccess(promiseId, reason)) return@before
-                val snapshot = gameAdPromiseSnapshots[promiseId]
-                val success = forceGameAdSuccessResult(promiseId, null, snapshot?.payload, snapshot?.messageType ?: gameAdPromiseTypeFromReason(reason))
-                runCatching { XposedBridge.invokeOriginalMethod(resolveMethod, param.thisObject, arrayOf(promiseId, success)); param.result = null }
+        runCatching {
+            rejectMethod.hookMethod {
+                before { param ->
+                    val promiseId = param.args.getOrNull(0) as? String ?: return@before
+                    val reason = param.args.drop(1).joinToString(" ") { it?.toString().orEmpty() }
+                    if (!shouldConvertGameAdRejectToSuccess(promiseId, reason)) return@before
+                    val snapshot = gameAdPromiseSnapshots[promiseId]
+                    val success = forceGameAdSuccessResult(promiseId, null, snapshot?.payload, snapshot?.messageType ?: gameAdPromiseTypeFromReason(reason))
+                    // Plain invoke (not invokeOriginalMethod) so the resolve hook above still
+                    // runs; its rewrite is idempotent.
+                    runCatching { resolveMethod.invoke(param.thisObject, promiseId, success); param.result = null }
+                }
             }
         }
     }
 
     if (bridgeRejectMethod != null && resolveMethod != null && bridgeRejectMethod != rejectMethod) {
-        bridgeRejectMethod.hookMethod {
-            before { param ->
-                val payload = param.args.getOrNull(2) as? JSONObject ?: return@before
-                val promiseId = extractPromiseId(payload) ?: return@before
-                val reason = param.args.take(2).joinToString(" ") { it?.toString().orEmpty() }
-                if (!shouldConvertGameAdRejectToSuccess(promiseId, reason)) return@before
-                val snapshot = gameAdPromiseSnapshots[promiseId]
-                val success = forceGameAdSuccessResult(promiseId, null, snapshot?.payload ?: payload, snapshot?.messageType ?: gameAdPromiseTypeFromReason(reason))
-                runCatching { XposedBridge.invokeOriginalMethod(resolveMethod, param.thisObject, arrayOf(promiseId, success)); param.result = null }
+        runCatching {
+            bridgeRejectMethod.hookMethod {
+                before { param ->
+                    val payload = param.args.getOrNull(2) as? JSONObject ?: return@before
+                    val promiseId = extractPromiseId(payload) ?: return@before
+                    val reason = param.args.take(2).joinToString(" ") { it?.toString().orEmpty() }
+                    if (!shouldConvertGameAdRejectToSuccess(promiseId, reason)) return@before
+                    val snapshot = gameAdPromiseSnapshots[promiseId]
+                    val success = forceGameAdSuccessResult(promiseId, null, snapshot?.payload ?: payload, snapshot?.messageType ?: gameAdPromiseTypeFromReason(reason))
+                    runCatching { resolveMethod.invoke(param.thisObject, promiseId, success); param.result = null }
+                }
             }
         }
     }
 }
 
-/** Hook Bundle-based service dispatch methods on the bridge class. */
+/** void(Bundle, String) service-dispatch methods on the bridge class — bundle rebuilt as payload. */
 fun hookGameAdServiceDispatchMethods(bridgeClass: Class<*>) {
-    if (!gameAdServiceDispatchHooksInstalled.compareAndSet(0, 1)) return
+    if (!gameAdServiceDispatchHookedClasses.add(bridgeClass.name)) return
     val methods = (bridgeClass.declaredMethods + bridgeClass.methods).filter { m ->
         !m.isStatic && m.returnType == Void.TYPE && m.parameterCount == 2 && m.parameterTypes[0] == Bundle::class.java
     }.distinctBy { m -> m.name + m.parameterTypes.joinToString { it.name } }
     methods.forEach { m ->
-        m.isAccessible = true
-        m.hookMethod {
-            before { param ->
-                val bundle = param.args.getOrNull(0) as? Bundle ?: return@before
-                val messageType = param.args.getOrNull(1)?.toString()?.lowercase()?.takeIf { it in GAME_AD_MESSAGE_TYPES } ?: return@before
-                val payload = buildGameAdPayloadFromServiceBundle(bundle, messageType)
-                rememberGameAdPayload(param.thisObject, payload, messageType)
-                if (rejectUnavailableGameAdPayloadIfNeeded(param.thisObject, payload, messageType, "service dispatch ${m.declaringClass.name}.${m.name}")) { param.result = null; return@before }
-                if (!shouldAutofixGameAdMessage(messageType)) return@before
-                if (resolveGameAdPayload(param.thisObject, payload, messageType)) {
-                    dispatchPostResolveGameAdSignals(param.thisObject, payload, messageType); param.result = null
+        runCatching {
+            m.isAccessible = true
+            m.hookMethod {
+                before { param ->
+                    val bundle = param.args.getOrNull(0) as? Bundle ?: return@before
+                    val messageType = param.args.getOrNull(1)?.toString()?.lowercase()?.takeIf { it in GAME_AD_MESSAGE_TYPES } ?: return@before
+                    val payload = buildGameAdPayloadFromServiceBundle(bundle, messageType)
+                    rememberGameAdPayload(param.thisObject, payload, messageType)
+                    if (!shouldForceGameAdSuccess(payload, messageType)) return@before
+                    if (resolveGameAdPayload(param.thisObject, payload, messageType)) {
+                        dispatchPostResolveGameAdSignals(param.thisObject, payload, messageType); param.result = null
+                    }
                 }
             }
         }
+    }
+}
+
+// ─── Game ads: runtime JS bridges (addJavascriptInterface) ────────────────────
+//
+// The delegate the game webview actually talks to is not always the DexKit-found bridge
+// (on 576 upstream measured X.q10 at runtime vs the scanned X.gJA). It can come from a
+// lazily loaded plugin dex whose obfuscated name is unknowable at patch time.
+// WebView.addJavascriptInterface is the stable seam that sees every delegate at
+// registration; its JS entry methods get the same bridge logic.
+//
+// Cost: addJavascriptInterface is called a handful of times per webview, and the hooked
+// entries bail out on a substring check before any JSON parsing — no periodic work.
+
+fun hookGameAdJavascriptInterfaceWatcher() {
+    if (!gameAdJavascriptWatcherInstalled.compareAndSet(0, 1)) return
+    runCatching {
+        WebView::class.java.getDeclaredMethod("addJavascriptInterface", Any::class.java, String::class.java)
+            .apply { isAccessible = true }
+            .hookMethod {
+                after { param ->
+                    val bridgeObject = param.args.getOrNull(0) ?: return@after
+                    runCatching { hookGameAdBridgeObject(bridgeObject) }
+                }
+            }
+    }
+}
+
+private fun hookGameAdBridgeObject(bridgeObject: Any) {
+    val bridgeClass = bridgeObject.javaClass
+    val all = bridgeClass.declaredMethods + bridgeClass.methods
+    val entryMethods = all.filter { m ->
+        !m.isStatic && m.parameterCount in 1..2 && m.parameterTypes[0] == String::class.java &&
+            m.isAnnotationPresent(JavascriptInterface::class.java)
+    }.ifEmpty {
+        all.filter { m -> m.name == "postMessage" && m.parameterTypes.firstOrNull() == String::class.java }
+    }
+    // Upstream hooks result/dispatch helpers on every registered object; NexAlloy only does
+    // so for objects that actually expose a JS entry — an object with no entry can never
+    // receive a game-ad message, so hooking its helpers would only add overhead.
+    if (entryMethods.isEmpty()) return
+    entryMethods.forEach { m -> runCatching { hookGameAdBridge(m) } }
+    runCatching { hookGameAdResultMethods(bridgeClass) }
+    runCatching { hookGameAdServiceDispatchMethods(bridgeClass) }
+}
+
+// ─── Game ads: script deliveries (evaluateJavascript / loadUrl / postWebMessage) ─
+//
+// The promise result is delivered back into the game webview as generated JavaScript
+// ("e = new Event('message');e.data = {...};window.dispatchEvent(e);") or as a WebMessage,
+// by plumbing whose shape varies per delegate. The JSON that carries a TRACKED promiseId is
+// rewritten in place: error fields dropped, success / reward outcome fields forced. A JS
+// promise settles once, so the failure call is replaced, never shadowed.
+//
+// Cost: when no game-ad promise is pending the hook returns after one isEmpty() check.
+
+fun hookGameAdScriptDeliveries() {
+    if (!gameAdScriptDeliveryHooksInstalled.compareAndSet(0, 1)) return
+
+    fun hookScriptArg(name: String, vararg types: Class<*>) = runCatching {
+        WebView::class.java.getDeclaredMethod(name, *types).apply { isAccessible = true }.hookMethod {
+            before { param ->
+                val script = param.args.getOrNull(0) as? String ?: return@before
+                rewriteGameAdDeliveryIfNeeded(script)?.let { param.args[0] = it }
+            }
+        }
+    }
+    hookScriptArg("evaluateJavascript", String::class.java, ValueCallback::class.java)
+    hookScriptArg("loadUrl", String::class.java)
+
+    runCatching {
+        val webMessageClass = Class.forName("android.webkit.WebMessage")
+        val getData = webMessageClass.getDeclaredMethod("getData")
+        val constructor = webMessageClass.getConstructor(String::class.java)
+        WebView::class.java.getDeclaredMethod("postWebMessage", webMessageClass, android.net.Uri::class.java)
+            .apply { isAccessible = true }
+            .hookMethod {
+                before { param ->
+                    val message = param.args.getOrNull(0) ?: return@before
+                    val data = runCatching { getData.invoke(message) as? String }.getOrNull() ?: return@before
+                    val rewritten = rewriteGameAdDeliveryIfNeeded(data) ?: return@before
+                    runCatching { param.args[0] = constructor.newInstance(rewritten) }
+                }
+            }
+    }
+}
+
+/** Rewrites a delivery that carries a tracked promise id that should succeed, else null. */
+private fun rewriteGameAdDeliveryIfNeeded(delivery: String): String? {
+    if (gameAdPromiseSnapshots.isEmpty()) return null
+    val promiseIds = gameAdPromiseSnapshots.keys.filter { delivery.contains(it) }
+    if (promiseIds.isEmpty()) return null
+    var result: String? = null
+    var current = delivery
+    promiseIds.forEach { promiseId ->
+        val snapshot = gameAdPromiseSnapshots[promiseId] ?: return@forEach
+        if (!shouldForceGameAdSuccess(snapshot.payload, snapshot.messageType)) return@forEach
+        val rewritten = rewritePromiseJsonInDelivery(current, promiseId, snapshot) ?: return@forEach
+        if (rewritten != current) { current = rewritten; result = rewritten }
+    }
+    return result
+}
+
+private fun rewritePromiseJsonInDelivery(delivery: String, promiseId: String, snapshot: GameAdPromiseSnapshot): String? =
+    runCatching {
+        val index = delivery.indexOf(promiseId)
+        if (index < 0) return@runCatching null
+        var start = delivery.lastIndexOf('{', index)
+        if (start < 0) return@runCatching null
+        // Expand to the enclosing object when the promiseId is nested (e.g. in "content"),
+        // so the rewrite covers the whole response.
+        while (start > 0) {
+            val outerStart = delivery.lastIndexOf('{', start - 1)
+            if (outerStart < 0) break
+            val outer = extractBalancedJson(delivery, outerStart) ?: break
+            if (!outer.contains(promiseId)) break
+            start = outerStart
+        }
+        val balanced = extractBalancedJson(delivery, start) ?: return@runCatching null
+        val end = start + balanced.length - 1
+        val originalJson = runCatching { JSONObject(balanced) }.getOrNull() ?: return@runCatching null
+        val success = forceGameAdSuccessResult(promiseId, originalJson, snapshot.payload, snapshot.messageType)
+        forceSuccessDeep(success, hasRewardGameAdSignal(snapshot.payload, snapshot.messageType))
+        delivery.substring(0, start) + success + delivery.substring(end + 1)
+    }.getOrNull()
+
+/** Brace-depth scanner with string/escape awareness. */
+private fun extractBalancedJson(text: String, start: Int): String? {
+    var depth = 0; var inString = false; var escaped = false
+    for (cursor in start until text.length) {
+        val c = text[cursor]
+        when {
+            escaped -> escaped = false
+            c == '\\' -> escaped = true
+            c == '"' -> inString = !inString
+            !inString && c == '{' -> depth++
+            !inString && c == '}' -> { depth--; if (depth == 0) return text.substring(start, cursor + 1) }
+        }
+    }
+    return null
+}
+
+/** Outcome fields may sit at the top level or inside "content"; errors at any level are dropped. */
+private fun forceSuccessDeep(json: JSONObject, reward: Boolean) {
+    val keys = ArrayList<String>()
+    val iter = json.keys(); while (iter.hasNext()) keys.add(iter.next())
+    keys.forEach { key ->
+        val value = json.opt(key)
+        when {
+            key == "error" || key == "errorMessage" || (key == "code" && value is String) -> json.remove(key)
+            value is JSONObject -> forceSuccessDeep(value, reward)
+        }
+    }
+    if (json.has("success") || json.has("error") || reward || json.has("completed")) {
+        json.put("success", true)
+        if (reward) json.put("completed", true).put("didComplete", true).put("watched", true)
+            .put("rewarded", true).put("completionGesture", "post")
     }
 }
 
@@ -1753,22 +1956,26 @@ fun rejectGameAdPayload(
     return runCatching { rejectMethod.invoke(target, promiseId, message, code); true }.getOrElse { false }
 }
 
-private fun rejectUnavailableGameAdPayloadIfNeeded(target: Any?, payload: Any?, messageType: String?, source: String = "unknown"): Boolean {
-    if (!shouldMakeGameAdUnavailable(payload, messageType)) return false
-    if (!rejectGameAdPayload(target, payload, GAME_AD_UNAVAILABLE_MESSAGE, GAME_AD_UNAVAILABLE_CODE)) {
-        return false
-    }
-    lastUnavailableGameAdMs.set(System.currentTimeMillis())
-    return true
+fun shouldAutofixGameAdMessage(messageType: String?) = messageType in GAME_AD_AUTOFIX_MESSAGE_TYPES
+
+/**
+ * True when the message should be resolved as success on the spot: banner lifecycle
+ * messages, rewarded requests, and reward-flavoured load/show calls. The game then grants
+ * the reward without any ad rendering. Plain interstitials fall through to the original;
+ * their activity is closed by the lifecycle / launch hooks.
+ */
+private fun shouldForceGameAdSuccess(payload: Any?, messageType: String?): Boolean {
+    if (shouldAutofixGameAdMessage(messageType)) return true
+    if (messageType !in setOf("loadadasync", "showadasync")) return false
+    return hasRewardGameAdSignal(payload, messageType)
 }
 
-private fun shouldMakeGameAdUnavailable(payload: Any?, messageType: String?): Boolean {
-    if (messageType in GAME_AD_UNAVAILABLE_MESSAGE_TYPES) return true
-    if (messageType !in setOf("loadadasync", "showadasync")) return false
+private fun hasRewardGameAdSignal(payload: Any?, messageType: String?): Boolean {
+    if (messageType in GAME_AD_REWARD_MESSAGE_TYPES) return true
     val content = extractGameAdContent(payload)
     val adInstanceId = content?.optString("adInstanceID")?.takeIf { it.isNotBlank() }
     val knownType = adInstanceId?.let { gameAdInstanceTypes[it] }
-    if (knownType in GAME_AD_UNAVAILABLE_MESSAGE_TYPES) return true
+    if (knownType in GAME_AD_REWARD_MESSAGE_TYPES) return true
     val placementText = listOf(
         content?.optString("placementID").orEmpty(),
         content?.optString("adType").orEmpty(),
@@ -1779,18 +1986,15 @@ private fun shouldMakeGameAdUnavailable(payload: Any?, messageType: String?): Bo
     return payload?.toString()?.lowercase()?.contains("rewarded") == true
 }
 
-fun shouldAutofixGameAdMessage(messageType: String?) = messageType in GAME_AD_AUTOFIX_MESSAGE_TYPES
-
-private fun shouldBlockGameAdActivityLaunch(className: String): Boolean {
-    return className in HARD_BLOCKED_GAME_AD_ACTIVITY_CLASS_NAMES ||
-        (className in setOf(AUDIENCE_NETWORK_ACTIVITY_CLASS, AUDIENCE_NETWORK_REMOTE_ACTIVITY_CLASS) &&
-         isRecentUnavailableGameAd())
-}
-
-private fun isRecentUnavailableGameAd(): Boolean {
-    val rejectedAt = lastUnavailableGameAdMs.get()
-    return rejectedAt > 0 && System.currentTimeMillis() - rejectedAt < GAME_AD_RECENT_WINDOW_MS
-}
+/**
+ * Only Neko playable ads are hard-blocked at launch. Audience Network activities are
+ * allowed to start so their own close/error flow can run, and are then closed by the
+ * activity hooks with RESULT_OK (upstream: blocking AN at startActivity hung games).
+ * Upstream's "recent unavailable" gate is never armed any more (rewarded requests resolve
+ * as success), so it is dropped here instead of being kept as dead state.
+ */
+private fun shouldBlockGameAdActivityLaunch(className: String): Boolean =
+    className in HARD_BLOCKED_GAME_AD_ACTIVITY_CLASS_NAMES
 
 private fun isRecentGameAdActivityClose(): Boolean {
     val closedAt = lastGameAdActivityCloseMs.get()
@@ -1800,6 +2004,7 @@ private fun isRecentGameAdActivityClose(): Boolean {
 private fun shouldConvertGameAdRejectToSuccess(promiseId: String, reason: String): Boolean {
     val snapshot = gameAdPromiseSnapshots[promiseId]
     if (shouldAutofixGameAdMessage(snapshot?.messageType)) return true
+    if (snapshot != null && shouldForceGameAdSuccess(snapshot.payload, snapshot.messageType)) return true
     val normalized = reason.lowercase()
     if (!isRecentGameAdActivityClose()) return false
     return normalized.contains("banner")
@@ -1857,7 +2062,7 @@ fun buildGameAdSuccessPayload(payload: Any?, messageType: String? = null): JSONO
     val requestedInstId = content?.optString("adInstanceID")?.takeIf { it.isNotBlank() }
     val bannerPosition = content?.optString("bannerPosition")?.takeIf { it.isNotBlank() }
     result.put("success", true)
-    if (effectiveMessageType?.contains("reward", ignoreCase = true) == true) {
+    if (hasRewardGameAdSignal(payload, effectiveMessageType)) {
         result.put("completed", true).put("didComplete", true).put("watched", true)
               .put("rewarded", true).put("completionGesture", "post")
     }
@@ -1883,21 +2088,19 @@ private fun forceGameAdSuccessResult(promiseId: String, original: Any?, payload:
     val success = buildGameAdSuccessPayload(payload ?: JSONObject().put("content", JSONObject().put("promiseID", promiseId)), messageType)
     val keys = success.keys(); while (keys.hasNext()) { val k = keys.next(); result.put(k, success.opt(k)) }
     result.put("success", true)
-    if (messageType?.contains("reward", ignoreCase = true) == true)
+    if (hasRewardGameAdSignal(payload, messageType))
         result.put("completed", true).put("didComplete", true).put("watched", true).put("rewarded", true).put("completionGesture", "post")
     return result
 }
 
-private fun inferGameAdMessageType(method: Method, payload: Any?): String? {
-    val payloadType = (payload as? JSONObject)?.optString("type")?.takeIf { it.isNotBlank() }
-    if (payloadType != null) return payloadType
-    return when (method.name) {
-        "D3s" -> "getinterstitialadasync"; "D3x" -> "getrewardedinterstitialasync"
-        "D3z" -> "getrewardedvideoasync"; "D55" -> "hidebanneradasync"
-        "D9v" -> "loadadasync"; "D9x" -> "loadbanneradasync"; "DX0" -> "showadasync"
-        else -> null
-    }
-}
+/**
+ * Message type from the payload's "type" field only. The former fallback that mapped
+ * obfuscated handler names (D3s, D3z, …) to types is dropped, as upstream did: those names
+ * rotate every Facebook release. Handlers that never see a typed payload are simply not
+ * autofixed.
+ */
+private fun inferGameAdMessageType(payload: Any?): String? =
+    (payload as? JSONObject)?.optString("type")?.takeIf { it.isNotBlank() }
 
 private fun gameAdPromiseTypeFromReason(reason: String): String? {
     val n = reason.lowercase()
@@ -2552,7 +2755,11 @@ private fun resolveGameAdResolveMethod(type: Class<*>?): Method? {
     if (type == null) return null
     val candidates = (type.declaredMethods + type.methods).filter { m ->
         !m.isStatic && m.returnType == Void.TYPE && m.parameterCount == 2 &&
-        m.parameterTypes[0] == String::class.java && !m.parameterTypes[1].isPrimitive
+        m.parameterTypes[0] == String::class.java && !m.parameterTypes[1].isPrimitive &&
+        // The JS bridge entry has the same shape but is NOT a promise helper: invoking it
+        // re-posts the message into the native pipeline. Critical now that runtime delegates
+        // from addJavascriptInterface go through this resolver too.
+        !m.isAnnotationPresent(JavascriptInterface::class.java) && m.name != "postMessage"
     }
     return (candidates.firstOrNull { it.parameterTypes[1] == Any::class.java }
         ?: candidates.firstOrNull { JSONObject::class.java.isAssignableFrom(it.parameterTypes[1]) }
@@ -3346,17 +3553,19 @@ private val marketplaceQueryNameRegex = Regex("query[\\s]+([A-Za-z0-9_]+)")
 private val marketplaceFriendlyNameRegex = Regex("fb_api_req_friendly_name=([A-Za-z0-9_]+)")
 
 fun hookMarketplaceSendRequest(method: Method): Boolean {
-    if (method.returnType != Void.TYPE || method.parameterCount < 5 || !markHooked(method)) return false
+    // The request body is the ReadableMap argument (index 4 on RN's sendRequest today).
+    val dataArg = method.parameterTypes.indexOfFirst { it.name == "com.facebook.react.bridge.ReadableMap" }
+    if (method.returnType != Void.TYPE || dataArg < 0 || !markHooked(method)) return false
     method.isAccessible = true
     method.hookMethod {
         before { param ->
-            val data = param.args.getOrNull(4)
+            val data = param.args.getOrNull(dataArg)
             val body = requestBodyOf(data) ?: return@before
             val name = marketplaceQueryNameRegex.find(body)?.groupValues?.get(1)
                 ?: marketplaceFriendlyNameRegex.find(body)?.groupValues?.get(1)
             if (name in MARKETPLACE_FEED_QUERY_NAMES) {
                 val rewritten = rewriteMarketplaceFeedVariables(body) ?: return@before
-                readableMapWithString(data, rewritten)?.let { param.args[4] = it }
+                readableMapWithString(data, rewritten)?.let { param.args[dataArg] = it }
                 return@before
             }
             if (MARKETPLACE_ADS_QUERY_MARKERS.any { body.contains(it) }) param.result = null
