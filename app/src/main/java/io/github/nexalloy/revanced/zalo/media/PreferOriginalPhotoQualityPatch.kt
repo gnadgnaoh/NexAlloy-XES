@@ -32,8 +32,10 @@ val PreferOriginalPhotoQuality = patch(
     ::originalQualityEntitledFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
     ::originalQualityAvailableFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
 
-    ::qualityPickerArgumentsFingerprint.hookMethod {
-        before { param -> param.args[0] = original }
+    ::qualityPickerArgumentsFingerprint.method.let { method ->
+        val qualityArg = method.parameterTypes.indexOfFirst { it == Int::class.javaPrimitiveType }
+        check(qualityArg >= 0) { "quality picker arguments: no int parameter" }
+        method.hookMethod { before { param -> param.args[qualityArg] = original } }
     }
 
     ::pickerQualitySetterFingerprint.hookMethod {

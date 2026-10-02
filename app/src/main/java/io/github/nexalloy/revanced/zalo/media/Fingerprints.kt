@@ -105,7 +105,8 @@ val qualityPickerArgumentsFingerprint = findMethodDirect {
         matcher {
             modifiers = Modifier.STATIC
             usingEqStrings(EXTRA_CURRENT_QUALITY, EXTRA_SOURCE_START_VIEW)
-            paramTypes("int", "android.os.Bundle", "java.lang.String", "java.lang.String")
+            // 26.09.01: (int quality, Bundle, String, String). The full signature is not needed to
+            // tell it apart; the patch finds the quality argument by type.
             returnType = "void"
         }
     }.single()
