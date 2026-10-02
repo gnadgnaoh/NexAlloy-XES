@@ -1,6 +1,9 @@
 package io.github.nexalloy.morphe.twitter.link.unshorten
 
 import io.github.nexalloy.morphe.Fingerprint
+import io.github.nexalloy.morphe.twitter.utils.X_MODELS_PACKAGE
+import io.github.nexalloy.morphe.twitter.utils.X_NAVIGATION_PACKAGE
+import io.github.nexalloy.morphe.twitter.utils.dataClassToString
 
 /**
  * com.x.models.text.UrlEntity (12.24.0: Lcom/x/models/text/m1;)
@@ -12,7 +15,7 @@ import io.github.nexalloy.morphe.Fingerprint
  */
 internal object UrlEntityToStringFingerprint : Fingerprint(
     name = "toString",
-    strings = listOf("UrlEntity(displayUrl="),
+    custom = { dataClassToString("UrlEntity", X_MODELS_PACKAGE) },
 )
 
 /**
@@ -60,10 +63,10 @@ internal object OpenUrlInAppFingerprint : Fingerprint(
 
 internal object LinkWithPostDetailArgsToStringFingerprint : Fingerprint(
     name = "toString",
-    strings = listOf("LinkWithPostDetailArgs(url="),
+    custom = { dataClassToString("LinkWithPostDetailArgs", X_NAVIGATION_PACKAGE) },
 )
 
 internal object WebViewArgsToStringFingerprint : Fingerprint(
     name = "toString",
-    strings = listOf("WebViewArgs(url="),
+    custom = { dataClassToString("WebViewArgs", X_NAVIGATION_PACKAGE) },
 )
