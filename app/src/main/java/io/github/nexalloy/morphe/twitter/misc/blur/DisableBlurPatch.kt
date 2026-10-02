@@ -7,7 +7,9 @@ val DisableBlur = patch(
     description = "Disables Haze blur in the Compose UI of the new X app, while preserving the " +
             "configured fallback tint and scrim effects. Has no effect on the older X UI.",
 ) {
-    ::hazeBlurEnabledSetterFingerprint.hookMethod {
+    // Constructor of ResolvedHazeBlurStyle (new Haze) or HazeEffectNode.setBlurEnabled (legacy):
+    // in both cases args[0] is the effective blurEnabled flag.
+    ::hazeBlurEnabledFingerprint.hookMethod {
         before { param -> param.args[0] = false }
     }
 }
