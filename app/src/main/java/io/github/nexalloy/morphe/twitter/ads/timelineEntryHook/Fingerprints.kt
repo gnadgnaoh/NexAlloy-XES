@@ -5,16 +5,19 @@ import io.github.nexalloy.morphe.Fingerprint
 import io.github.nexalloy.morphe.findMethodDirect
 import org.luckypray.dexkit.result.MethodData
 import java.lang.reflect.Modifier
+import io.github.nexalloy.morphe.twitter.utils.X_MODELS_PACKAGE
+import io.github.nexalloy.morphe.twitter.utils.dataClassToString
 
 internal object PromotedMetadataToStringFingerprint : Fingerprint(
     name = "toString",
-    strings = listOf("TimelinePromotedMetadata(impressionId="),
+    custom = { dataClassToString("TimelinePromotedMetadata", X_MODELS_PACKAGE) },
 )
 
 internal object ClientEventInfoToStringFingerprint : Fingerprint(
     name = "toString",
-    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
-    strings = listOf("ClientEventInfo(component="),
+    // Thrift `ClientEventInfo` and GraphQL `*ClientEventInfo` fragments share the simple name;
+    // the models package scope (not the `final` flag) is what keeps this unique.
+    custom = { dataClassToString("ClientEventInfo", X_MODELS_PACKAGE) },
 )
 
 private const val DATABASE_PACKAGE = "com.x.database."
