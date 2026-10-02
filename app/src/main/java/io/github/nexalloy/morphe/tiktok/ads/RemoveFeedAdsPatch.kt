@@ -44,7 +44,8 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
 
     optional("insertItemList") {
         val filterPayload: IHookCallback = { param ->
-            filterSingleListField(param.args.firstOrNull(), "insertItemList")
+            // The payload is found by shape, not by position: every argument is tried.
+            param.args.forEach { filterSingleListField(it, "insertItemList") }
         }
         val inserts = ::feedInsertItemListFingerprints.dexMethodList.realMatches()
         check(inserts.isNotEmpty()) { "insertItemList not found" }
@@ -84,7 +85,10 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
             callbacks.forEach {
                 it.hookMethod {
                     before { param ->
-                        AwemeAdFilter.filteredCopyOrNull(param.args[0] as? List<*>)?.let { kept -> param.args[0] = kept }
+                        val listArg = param.args.indexOfFirst { arg -> arg is List<*> }
+                        if (listArg < 0) return@before
+                        AwemeAdFilter.filteredCopyOrNull(param.args[listArg] as? List<*>)
+                            ?.let { kept -> param.args[listArg] = kept }
                     }
                 }
             }
@@ -97,14 +101,14 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         check(callbacks.isNotEmpty()) { "ProfileTalentShareAdResult reader not found" }
         callbacks.forEach {
             it.hookMethod {
-                before { param -> filterTalentAdResult(param.args.firstOrNull()) }
+                before { param -> param.args.forEach { filterTalentAdResult(it) } }
             }
         }
     }
 
     optional("talentProfileAdEvent") {
         val filterEvent: IHookCallback = { param ->
-            filterSingleListField(param.args.firstOrNull(), "talentProfileAdEvent")
+            param.args.forEach { filterSingleListField(it, "talentProfileAdEvent") }
         }
         val byName = DETAIL_FRAGMENT_CLASS.findClassOrNull(classLoader)?.declaredMethods
             ?.filter { it.name == "onTalentProfileAdEvent" && it.parameterCount == 1 }

@@ -6,6 +6,7 @@ import io.github.nexalloy.morphe.findMethodListDirect
 import io.github.nexalloy.morphe.methodCall
 import io.github.nexalloy.morphe.string
 import org.luckypray.dexkit.DexKitBridge
+import java.lang.reflect.Modifier
 import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.result.MethodData
 import org.luckypray.dexkit.wrap.DexMethod
@@ -101,7 +102,6 @@ val feedApiFetchFeedListFingerprints = findMethodListDirect {
             matcher {
                 name = "fetchFeedList"
                 returnType = FEED_ITEM_LIST_CLASS
-                paramCount = 1
             }
         }.filter { it.isConcrete }
     }
@@ -114,7 +114,6 @@ val feedApiFetchFeedListFingerprints = findMethodListDirect {
 internal object FeedInsertItemListFingerprint : Fingerprint(
     returnType = "V",
     strings = listOf("insertItemList fall to downgrade logic"),
-    custom = { paramCount = 1 },
 )
 
 /** Same method described by structure only, used when the log string disappears. */
@@ -128,7 +127,6 @@ internal object FeedInsertItemListByStructureFingerprint : Fingerprint(
         ),
     ),
     custom = {
-        paramCount = 1
         declaredClass("BaseListFragmentPanel", StringMatchType.EndsWith)
     },
 )
@@ -158,9 +156,34 @@ internal object ColdStartFeedCacheFingerprint : Fingerprint(
     parameters = listOf(),
 )
 
+/** Upper bound for the structural fallback; a handful of cache readers exist (2 on 47.1.4). */
+private const val MAX_FEED_CACHE_GETTERS = 6
+
+/**
+ * Every static, no-argument `FeedItemList` getter: the feed caches read at cold start.
+ *
+ * 47.1.4 dropped the "processOfflineVideoHitCache" log the legacy fingerprint was anchored on and
+ * reads the previous session from two places instead ("getColdCacheDB", "tryUseCache"). Anchoring
+ * on the Gson model type rather than on log text keeps this working across such rewrites. Every
+ * match only feeds [filterFeedItemList], which removes ads and leaves everything else untouched,
+ * so hooking one cache reader too many is harmless.
+ */
+private fun DexKitBridge.staticFeedCacheGetters(): List<MethodData> =
+    findMethod {
+        matcher {
+            returnType = FEED_ITEM_LIST_CLASS
+            paramCount = 0
+            modifiers(Modifier.STATIC)
+        }
+    }.filter { Modifier.isStatic(it.modifiers) && !it.isConstructor }
+        .also { check(it.size <= MAX_FEED_CACHE_GETTERS) { "too many FeedItemList cache getters: ${it.size}" } }
+
 /** [ColdStartFeedCacheFingerprint], so that a build without that cache is remembered as such. */
 val coldStartFeedCacheFingerprints = findMethodListDirect {
-    cacheable { listOf(ColdStartFeedCacheFingerprint.run()) }
+    cacheable {
+        runCatching { listOf(ColdStartFeedCacheFingerprint.run()) }
+            .getOrElse { staticFeedCacheGetters() }
+    }
 }
 
 // endregion
@@ -192,7 +215,7 @@ val videoGridAdListFilterFingerprints = findMethodListDirect {
             .filter {
                 it.isConcrete &&
                         it.returnTypeName == "java.util.List" &&
-                        it.paramTypeNames.singleOrNull() == "java.util.List"
+                        "java.util.List" in it.paramTypeNames
             }
             .filter { caller ->
                 caller.invokes.any { it.declaredClassName.contains("TalentAdRevenueShareService") }
@@ -210,7 +233,6 @@ val profileResultCallbackFingerprints = findMethodListDirect {
                     matcher {
                         usingStrings(listOf(log), StringMatchType.Equals)
                         returnType = "void"
-                        paramTypes("java.util.List", "boolean")
                     }
                 }
             }
@@ -237,8 +259,7 @@ val talentProfileAdsCallbackFingerprints = findMethodListDirect {
 
         profileAds.readers
             .filter {
-                it.isConcrete && it.paramCount == 1 &&
-                        it.declaredClassName != TALENT_AD_RESULT_CLASS
+                it.isConcrete && it.declaredClassName != TALENT_AD_RESULT_CLASS
             }
             .distinctBy { it.descriptor }
     }
@@ -254,7 +275,6 @@ val talentProfileAdEventSubscriberFingerprints = findMethodListDirect {
         findMethod {
             matcher {
                 name = "onTalentProfileAdEvent"
-                paramCount = 1
                 returnType = "void"
             }
         }.filter { it.isConcrete }
