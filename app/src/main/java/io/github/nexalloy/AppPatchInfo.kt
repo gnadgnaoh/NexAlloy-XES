@@ -23,7 +23,17 @@ import io.github.nexalloy.morphe.tiktok.TikTokPatches
 import io.github.nexalloy.morphe.twitter.utils.Constants.PACKAGE_NAME as TWITTER_PACKAGE_NAME
 import io.github.nexalloy.v4n1x.morphe.soundcloud.shared.Constants.PACKAGE_NAME as SOUNDCLOUD_PACKAGE_NAME
 
-enum class DexSource { APK_PATH, CLASS_LOADER }
+/**
+ * Where DexKit reads the app's code from.
+ *
+ * - [APK_PATH]: base.apk only. Cheapest; enough when the app ships all its code in base.apk.
+ * - [APK_WITH_SPLITS]: the app's class loader, i.e. base.apk plus every installed split
+ *   (feature modules such as TikTok's `df_a_dex`). Falls back to [APK_PATH] when no split is
+ *   installed. Patching still runs synchronously at startup.
+ * - [CLASS_LOADER]: the class loader, deferred until code loaded at runtime is in place
+ *   (Facebook; see KatanaDexGate).
+ */
+enum class DexSource { APK_PATH, APK_WITH_SPLITS, CLASS_LOADER }
 
 class AppPatchInfo(
     val appName: String,
@@ -49,8 +59,10 @@ val appPatchConfigurations = listOf(
     AppPatchInfo("Google (Discover)", "com.google.android.googlequicksearchbox", GoogleDiscoverPatches),
     AppPatchInfo("Twitter/X", TWITTER_PACKAGE_NAME, TwitterPatches),
     AppPatchInfo("Gmail", GMAIL_PACKAGE_NAME, GmailPatches),
-    AppPatchInfo("TikTok", TIKTOK_PACKAGE_NAME, TikTokPatches),
-    AppPatchInfo("TikTok (Asia)", TIKTOK_ASIA_PACKAGE_NAME, TikTokPatches),
+    // Profile/grid ad filters, the talent ad event and the offline cache live in the `df_a_dex`
+    // feature split (all of them on TikTok Asia 47.0.3), which base.apk alone does not contain.
+    AppPatchInfo("TikTok", TIKTOK_PACKAGE_NAME, TikTokPatches, DexSource.APK_WITH_SPLITS),
+    AppPatchInfo("TikTok (Asia)", TIKTOK_ASIA_PACKAGE_NAME, TikTokPatches, DexSource.APK_WITH_SPLITS),
 )
 
 val patchesByPackage = appPatchConfigurations.associate { it.packageName to it.patches }
