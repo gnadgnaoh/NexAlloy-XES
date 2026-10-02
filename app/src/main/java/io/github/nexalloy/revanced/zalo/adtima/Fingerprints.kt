@@ -130,7 +130,9 @@ val adtimaOfflineWindowFingerprint = findMethodDirect {
             paramCount = 0
             returnType = "boolean"
             usingEqStrings("n")
-            addInvoke("Lcom/adtima/Adtima;->e(Ljava/lang/String;Ljava/lang/String;)V")
+            // Any call into the Adtima facade: its own method names (`e`, ...) are obfuscated by
+            // the SDK build and change between SDK versions; the class name is public API.
+            addInvoke { declaredClass(ADTIMA_CLASS) }
             addInvoke("Ljava/lang/System;->currentTimeMillis()J")
             addInvoke("Ljava/lang/Long;->longValue()J")
         }
