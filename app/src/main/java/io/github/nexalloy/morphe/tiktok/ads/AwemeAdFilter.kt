@@ -28,7 +28,18 @@ internal object AwemeAdFilter {
     @Volatile
     var hidePromotedMusic = false
 
-    val enabled get() = hideAds || hidePromotedMusic
+    /** TikTok Shop cards inserted into the feed: see [isShopCard]. */
+    @Volatile
+    var hideShopCards = false
+
+    val enabled get() = hideAds || hidePromotedMusic || hideShopCards
+
+    /**
+     * `cardInsertInfo.cardType` values of TikTok Shop cards. Starts with the native EC card; the
+     * Lynx EC and Shop search card types are server settings, added as [HideShopAds] sees TikTok
+     * request or read them.
+     */
+    val shopCardTypes: MutableSet<Int> = ConcurrentHashMap.newKeySet<Int>().apply { add(NATIVE_EC_CARD_TYPE) }
 
     private lateinit var awemeClass: Class<*>
 
@@ -41,7 +52,19 @@ internal object AwemeAdFilter {
         if (hideAds && (item.callMethodOrNull("isAd") == true || item.callMethodOrNull("isSoftAd") == true)) {
             return true
         }
+        if (hideShopCards && isShopCard(item)) return true
         return hidePromotedMusic && item.callMethodOrNull("isWithPromotionalMusic") == true
+    }
+
+    /**
+     * A card the card-insert platform put into the feed (an Aweme carrying `cardInsertInfo`)
+     * whose type is a TikTok Shop card. Ordinary videos have no cardInsertInfo; other inserted
+     * cards (story recap, milestones, mini dramas...) have other types and are kept.
+     */
+    private fun isShopCard(item: Any): Boolean {
+        val cardInsertInfo = item.callMethodOrNull("getCardInsertInfo") ?: return false
+        val cardType = cardInsertInfo.callMethodOrNull("getCardType") as? Int ?: return false
+        return cardType in shopCardTypes
     }
 
     /**
