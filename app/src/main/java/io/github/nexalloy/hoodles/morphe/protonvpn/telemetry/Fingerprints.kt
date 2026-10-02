@@ -1,30 +1,78 @@
 package io.github.nexalloy.hoodles.morphe.protonvpn.telemetry
 
-import io.github.nexalloy.morphe.Fingerprint
-import io.github.nexalloy.morphe.AccessFlags
+import io.github.nexalloy.morphe.findMethodDirect
+import io.github.nexalloy.morphe.findMethodListDirect
+import org.luckypray.dexkit.query.enums.StringMatchType
+import org.luckypray.dexkit.result.MethodData
 
-internal object TelemetryWorkerEnqueueFingerprint : Fingerprint(
-    definingClass = "Lme/proton/core/telemetry/data/worker/TelemetryWorkerManagerImpl;",
-    name = "enqueueOrKeep-HG0u8IE",
-    returnType = "V",
-)
+/*
+ * Anchored on classes R8 cannot rename: WorkManager instantiates workers by class name, and
+ * DataMetricsRequest / TelemetryEvent are @Serializable. The managers and data sources around
+ * them are obfuscated (me.proton.core is minified together with the app).
+ */
 
-internal object SendObservabilityFingerprint : Fingerprint(
-    definingClass = "Lme/proton/core/observability/data/usecase/SendObservabilityEventsImpl;",
-    name = "invoke",
-    returnType = "Ljava/lang/Object;",
-    parameters = listOf(
-        "Ljava/util/List;",
-        "Lkotlin/coroutines/Continuation;",
-    ),
-)
+private const val TELEMETRY_WORKER = "me.proton.core.telemetry.data.worker.TelemetryWorker"
+private const val DATA_METRICS_REQUEST = "me.proton.core.observability.data.api.request.DataMetricsRequest"
+private const val TELEMETRY_EVENT = "com.protonvpn.android.telemetry.TelemetryEvent"
+private const val USER_ID = "me.proton.core.domain.entity.UserId"
 
-internal object VpnTelemetryAddEventFingerprint : Fingerprint(
-    returnType = "Ljava/lang/Object;",
-    accessFlags = listOf(AccessFlags.PRIVATE, AccessFlags.FINAL),
-    parameters = listOf(
-        "Lcom/protonvpn/android/telemetry/TelemetryEvent;",
-        "Z",
-        "Lkotlin/coroutines/Continuation;",
-    ),
-)
+private fun <T> List<T>.atLeastOne(what: String, describe: (T) -> String): List<T> =
+    ifEmpty { throw Exception("No $what found") }.also {
+        if (it.size > 4) throw Exception("Too many $what (${it.size}): ${it.joinToString { d -> describe(d) }}")
+    }
+
+/**
+ * `TelemetryWorkerManagerImpl.enqueueOrKeep / enqueueOrReplace(userId, delay)`: every void method
+ * outside the worker that builds the TelemetryWorker request. Blocking both keeps the worker from
+ * ever being scheduled.
+ */
+val telemetryWorkerEnqueueFingerprints = findMethodListDirect {
+    val requestBuilders = findClass {
+        matcher { className(TELEMETRY_WORKER + "$", StringMatchType.StartsWith) }
+    }.flatMap { it.methods }
+        .filter { it.paramTypeNames.firstOrNull() == USER_ID && it.returnTypeName != "void" }
+
+    requestBuilders.flatMap { it.callers }
+        .filter { it.returnTypeName == "void" && !it.className.startsWith(TELEMETRY_WORKER) }
+        .filter { it.paramTypeNames.firstOrNull() == USER_ID }
+        .distinctBy { it.descriptor }
+        .atLeastOne("TelemetryWorker enqueue method") { it.descriptor }
+}
+
+/**
+ * The observability remote data source's `sendEvents(events)` (suspend): the only producer of a
+ * DataMetricsRequest outside the request class itself. The request is built inside a suspend
+ * lambda, so the lambda's enclosing class is followed to the `(List, Continuation)` method.
+ */
+internal val sendObservabilityFingerprint = findMethodDirect {
+    val producers: List<MethodData> = findMethod {
+        matcher { addInvoke { declaredClass(DATA_METRICS_REQUEST); name = "<init>" } }
+    }.filter { !it.className.startsWith(DATA_METRICS_REQUEST) }
+
+    val senders = producers.flatMap { producer ->
+        val outer = producer.className.substringBefore('$')
+        val inOuter = findMethod {
+            matcher {
+                declaredClass(outer)
+                returnType = "java.lang.Object"
+                paramCount = 2
+            }
+        }.filter { it.paramTypeNames.firstOrNull() == "java.util.List" }
+        if (producer.paramTypeNames.firstOrNull() == "java.util.List") inOuter + producer else inOuter
+    }.distinctBy { it.descriptor }
+
+    senders.singleOrNull() ?: throw Exception(
+        "Expected one observability sender, found ${senders.size}: ${senders.joinToString { it.descriptor }}",
+    )
+}
+
+/** `VpnTelemetry.addEvent(event, sendImmediately)` (suspend, logs "event added, total: "). */
+internal val vpnTelemetryAddEventFingerprint = findMethodDirect {
+    findMethod {
+        matcher {
+            usingStrings(listOf("event added, total: "), StringMatchType.Equals)
+            returnType = "java.lang.Object"
+        }
+    }.filter { it.paramTypeNames.firstOrNull() == TELEMETRY_EVENT }
+        .let { it.singleOrNull() ?: throw Exception("Expected one VpnTelemetry.addEvent, found ${it.size}") }
+}
