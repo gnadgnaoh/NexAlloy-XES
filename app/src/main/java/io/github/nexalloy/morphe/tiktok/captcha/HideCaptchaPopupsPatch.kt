@@ -1,10 +1,19 @@
 package io.github.nexalloy.morphe.tiktok.captcha
 
+import android.app.Activity
 import app.morphe.extension.shared.Logger
+import java.lang.reflect.Method
 import io.github.nexalloy.morphe.tiktok.shared.TikTokServices
+import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
 
 private const val TAG = "[TikTok captcha]"
+private const val BD_TURING_CALLBACK = "com.tts.oecverify.BdTuringCallback"
+
+/** Index of the first parameter accepted by [accepts]; arguments are never taken by position. */
+private fun Method.argIndex(role: String, accepts: (Class<*>) -> Boolean): Int =
+    parameterTypes.indexOfFirst(accepts).takeIf { it >= 0 }
+        ?: throw IllegalStateException("$name: no parameter for $role in ${parameterTypes.joinToString { it.name }}")
 
 val HideCaptchaPopups = patch(
     name = "Hide CAPTCHA popups",
@@ -31,11 +40,24 @@ val HideCaptchaPopups = patch(
         check(CaptchaSuppressor.canCloseSecCaptcha()) { "SecCaptcha close callbacks not found" }
     }
 
+    // The Sec listener type is the class declaring the close callbacks resolved above.
+    val listenerClass: Class<*>? = runCatching {
+        ::secCaptchaCloseCallbacksFingerprint.dexMethodList.first().toMethod().declaringClass
+    }.getOrNull()
+    fun Method.listenerArg() = argIndex("listener") { type ->
+        type != Any::class.java && listenerClass != null && type.isAssignableFrom(listenerClass)
+    }
+    fun Method.activityArg() = argIndex("activity") { Activity::class.java.isAssignableFrom(it) }
+
     // Covers LIVE as well: its host implementation wraps the listener and calls the same API.
     if (CaptchaSuppressor.canCloseSecCaptcha()) optional("popCaptchaV2") {
-        PopCaptchaV2Fingerprint.hookMethod {
+        val method = PopCaptchaV2Fingerprint.method
+        val activity = method.activityArg()
+        val riskInfo = method.argIndex("riskInfo") { it == String::class.java }
+        val listener = method.listenerArg()
+        method.hookMethod {
             before { param ->
-                if (CaptchaSuppressor.handleRiskInfoCaptcha(param.args[0], param.args[1], param.args[2])) {
+                if (CaptchaSuppressor.handleRiskInfoCaptcha(param.args[activity], param.args[riskInfo], param.args[listener])) {
                     param.result = null
                 }
             }
@@ -43,9 +65,12 @@ val HideCaptchaPopups = patch(
     }
 
     if (CaptchaSuppressor.canCloseSecCaptcha()) optional("popCaptcha") {
-        PopCaptchaFingerprint.hookMethod {
+        val method = PopCaptchaFingerprint.method
+        val activity = method.activityArg()
+        val listener = method.listenerArg()
+        method.hookMethod {
             before { param ->
-                if (CaptchaSuppressor.handleLegacyCaptcha(param.args[0], param.args[2])) {
+                if (CaptchaSuppressor.handleLegacyCaptcha(param.args[activity], param.args[listener])) {
                     param.result = null
                 }
             }
@@ -55,9 +80,12 @@ val HideCaptchaPopups = patch(
     // TikTok Shop / oec verification: a second SDK with its own dialog and its own callback.
     // Independent of the Sec listener above; it answers through BdTuringCallback instead.
     optional("oecVerification") {
-        OecRiskControlExecuteFingerprint.hookMethod {
+        val method = OecRiskControlExecuteFingerprint.method
+        val callback = method.argIndex("callback") { it.name == BD_TURING_CALLBACK }
+        val request = method.argIndex("request") { it.name != BD_TURING_CALLBACK }
+        method.hookMethod {
             before { param ->
-                if (CaptchaSuppressor.handleVerifyRequest(param.args[0], param.args[1])) {
+                if (CaptchaSuppressor.handleVerifyRequest(param.args[request], param.args[callback])) {
                     param.result = true
                 }
             }
