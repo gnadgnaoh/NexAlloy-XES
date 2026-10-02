@@ -10,19 +10,22 @@ import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.result.ClassData
 import org.luckypray.dexkit.result.FieldData
 import org.luckypray.dexkit.result.MethodData
+import io.github.nexalloy.morphe.twitter.utils.X_MODELS_PACKAGE
+import io.github.nexalloy.morphe.twitter.utils.X_URT_PACKAGE
+import io.github.nexalloy.morphe.twitter.utils.dataClassToString
 
 private val KOTLIN_TO_STRING_FLAGS = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL)
 
 internal object CanonicalPostToStringFingerprint : Fingerprint(
     name = "toString",
     accessFlags = KOTLIN_TO_STRING_FLAGS,
-    strings = listOf("CanonicalPost(id="),
+    custom = { dataClassToString("CanonicalPost", X_MODELS_PACKAGE) },
 )
 
 internal object AvailablePostToStringFingerprint : Fingerprint(
     name = "toString",
     accessFlags = KOTLIN_TO_STRING_FLAGS,
-    strings = listOf("AvailablePost(entryId="),
+    custom = { dataClassToString("AvailablePost", X_URT_PACKAGE) },
 )
 
 private const val INT = "int"
@@ -47,6 +50,8 @@ internal const val PROP_IS_POSSIBLY_SENSITIVE = "isPossiblySensitive"
 
 private const val PREMIUM_UPSELL_PACKAGE = "com.x.premium.upsell."
 
+private val ADD_ELEMENT_PARAMS = listOf("java.lang.String", BOOLEAN)
+
 private fun DexKitBridge.serialElementNames(serialName: String): List<String> {
     val candidates = findMethod {
         matcher {
@@ -64,11 +69,41 @@ private fun DexKitBridge.serialElementNames(serialName: String): List<String> {
                 candidates.joinToString { it.descriptor } + ")",
         )
 
-    val strings = clinit.instructions.mapNotNull { it.string }
-    val start = strings.indexOf(serialName)
+    val instructions = clinit.instructions
+    val start = instructions.indexOfFirst { it.string == serialName }
     if (start < 0) throw Exception("serial name $serialName missing from ${clinit.descriptor}")
+    val tail = instructions.drop(start + 1)
 
-    return strings.drop(start + 1)
+    // PluginGeneratedSerialDescriptor(serialName, generatedSerializer, elementsCount):
+    // the element count literal is loaded before the first call after the serial name.
+    val declaredCount = tail
+        .takeWhile { it.methodRef == null }
+        .firstNotNullOfOrNull { it.literal }
+        ?.toInt()
+
+    // Each property is `const-string name` followed by addElement(String, Boolean): Unit.
+    // Strings that are not passed to addElement are ignored instead of being taken as properties.
+    val names = mutableListOf<String>()
+    var pending: String? = null
+    for (insn in tail) {
+        val string = insn.string
+        if (string != null) {
+            pending = string
+            continue
+        }
+        val ref = insn.methodRef ?: continue
+        if (pending != null && ref.returnTypeName == "void" && ref.paramTypeNames == ADD_ELEMENT_PARAMS) {
+            names += pending
+        }
+        pending = null
+    }
+
+    if (declaredCount != null && declaredCount != names.size) {
+        throw Exception(
+            "$serialName declares $declaredCount elements but ${names.size} were read: $names",
+        )
+    }
+    return names
 }
 
 private fun ClassData.primaryConstructor(): MethodData {
@@ -104,6 +139,15 @@ private fun DexKitBridge.canonicalPostBooleanField(property: String): FieldData 
     }
 
     val fieldNames = canonicalPost.primaryConstructor().assignedFieldNames(canonicalPost.name)
+    // Property #i is the i-th field written by the primary constructor. That only holds while
+    // every assigned field is a serialized property; a @Transient/derived field would shift the
+    // mapping silently, so refuse to guess instead of flipping an unrelated boolean.
+    if (fieldNames.size != properties.size) {
+        throw Exception(
+            "${canonicalPost.name}: constructor assigns ${fieldNames.size} fields but " +
+                "$CANONICAL_POST_SERIAL has ${properties.size} properties",
+        )
+    }
     val name = fieldNames.getOrNull(index) ?: throw Exception(
         "$property is property #$index but ${canonicalPost.name}'s constructor assigns only " +
             "${fieldNames.size} fields",
