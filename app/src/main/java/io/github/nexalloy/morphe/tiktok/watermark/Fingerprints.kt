@@ -12,7 +12,6 @@ internal const val TRANSCODE_NO_WATERMARK = 1
 internal object AclCommonShareTranscodeFingerprint : Fingerprint(
     name = TRANSCODE_GETTER,
     returnType = "I",
-    parameters = emptyList(),
     custom = { declaredClass("ACLCommonShare", StringMatchType.EndsWith) },
 )
 
