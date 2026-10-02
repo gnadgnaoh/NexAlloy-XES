@@ -2,43 +2,56 @@ package io.github.nexalloy.hoodles.morphe.protonvpn.premium
 
 import app.morphe.extension.shared.Logger
 import de.robv.android.xposed.XC_MethodReplacement
-import io.github.nexalloy.callMethod
 import io.github.nexalloy.enumValueOf
-import io.github.nexalloy.findField
-import io.github.nexalloy.getObjectField
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
 import io.github.nexalloy.scopedHook
+import java.lang.reflect.Constructor
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.util.Collections
 
+private const val SUBSCRIBED = 1
 private const val MAX_TIER = 3
 private const val PAID_TIER_NAME = "vpn2022"
 
 private val freeServersOnlyDepth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
 
+/** Index of the only parameter of [type]; fails loudly if the constructor shape changed. */
+private fun Constructor<*>.onlyParamOf(type: Class<*>, role: String): Int =
+    parameterTypes.withIndex().filter { it.value == type }.map { it.index }.singleOrNull()
+        ?: throw Exception("$declaringClass: expected one ${type.simpleName} parameter for $role")
+
+private fun Constructor<*>.firstParamOf(type: Class<*>, role: String): Int =
+    parameterTypes.indexOfFirst { it == type }.takeIf { it >= 0 }
+        ?: throw Exception("$declaringClass: no ${type.simpleName} parameter for $role")
+
 val UnlockVpnPlus = patch(
     name = "Unlock VPN Plus",
     description = "Spoofs the highest plan tier for all UI unlocks, while routing connections through free servers for server-side compatibility. Also skips the upgrade onboarding dialog after login.",
 ) {
-    val serverClass = classLoader.loadClass("com.protonvpn.android.servers.Server")
+    val serverClass = classLoader.loadClass(SERVER) // @Serializable: name and members are kept
     val isFreeServer: Method = serverClass.getMethod("isFreeServer")
+    val getOnline: Method = serverClass.getMethod("getOnline")
+    val getServerList: Method = classLoader.loadClass(VPN_COUNTRY).getMethod("getServerList")
     fun Any.isFree() = isFreeServer.invoke(this) as Boolean
 
-    VpnUserConstructorFingerprint.hookMethod {
+    // VpnUser(userId, subscribed: Int, ..., planName: String?, ..., maxTier: Int?, ...).
+    // Every tier getter derives from these fields, so they are spoofed at construction.
+    // Roles are resolved by type, in declaration order of the data class.
+    val vpnUserCtor = ::vpnUserConstructor.constructor
+    val subscribedArg = vpnUserCtor.firstParamOf(Int::class.javaPrimitiveType!!, "subscribed")
+    val planNameArg = vpnUserCtor.firstParamOf(String::class.java, "planName")
+    val maxTierArg = vpnUserCtor.onlyParamOf(Int::class.javaObjectType, "maxTier")
+    vpnUserCtor.hookMethod {
         before { param ->
-            param.args[1] = 1
-            param.args[11] = MAX_TIER
+            param.args[subscribedArg] = SUBSCRIBED
+            param.args[planNameArg] = PAID_TIER_NAME
+            param.args[maxTierArg] = MAX_TIER
         }
     }
 
-    VpnUserGetUserTierFingerprint.hookMethod(XC_MethodReplacement.returnConstant(MAX_TIER))
-    VpnUserGetMaxTierFingerprint.hookMethod(XC_MethodReplacement.returnConstant(MAX_TIER))
-    VpnUserIsFreeUserFingerprint.hookMethod(XC_MethodReplacement.returnConstant(false))
-    VpnUserIsUserPlusOrAboveFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
-    VpnUserGetUserTierNameFingerprint.hookMethod(XC_MethodReplacement.returnConstant(PAID_TIER_NAME))
-    HasAccessToServerFingerprint.hookMethod {
+    ::hasAccessToServerFingerprint.hookMethod {
         before { param ->
             param.result = if (freeServersOnlyDepth.get()!! > 0) {
                 param.args[0] != null && param.args[1]?.isFree() == true
@@ -47,17 +60,25 @@ val UnlockVpnPlus = patch(
             }
         }
     }
-    HaveAccessWithFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
-    ServerGroupGetAvailableFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
+    ::haveAccessWithFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
 
-    ServerListFilterFingerprint.hookMethod {
-        before { param ->
-            val server = param.args[6] ?: return@before
-            if (!server.isFree()) param.result = false
+    // ServerGroup(data, available, connected): `available` is the first Boolean.
+    ::serverGroupConstructor.constructor.let { ctor ->
+        val availableArg = ctor.firstParamOf(Boolean::class.javaPrimitiveType!!, "available")
+        ctor.hookMethod { before { param -> param.args[availableArg] = true } }
+    }
+
+    ::serverListFilterFingerprint.method.let { filter ->
+        val serverArg = filter.parameterTypes.indexOfFirst { it == serverClass }
+        filter.hookMethod {
+            before { param ->
+                val server = param.args[serverArg] ?: return@before
+                if (!server.isFree()) param.result = false
+            }
         }
     }
 
-    GetBestScoreServerFingerprint.hookMethod {
+    ::getBestScoreServerFingerprint.hookMethod {
         before { param ->
             val servers = param.args[0] as? Iterable<*> ?: return@before
             val freeServers = ArrayList<Any>()
@@ -68,32 +89,27 @@ val UnlockVpnPlus = patch(
         }
     }
 
-    IsFeatureFlagEnabledFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
-    GetNetShieldAvailabilityFingerprint.method.let { method ->
+    ::isFeatureFlagEnabledFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
+
+    ::getNetShieldAvailabilityFingerprint.method.let { method ->
         val available = method.returnType.enumValueOf("AVAILABLE")
             ?: error("NetShieldAvailability.AVAILABLE not found")
         method.hookMethod(XC_MethodReplacement.returnConstant(available))
     }
 
-    GetFilterButtonsFingerprint.hookMethod(
+    ::getFilterButtonsFingerprint.hookMethod(
         XC_MethodReplacement.returnConstant(Collections.emptyList<Any>())
     )
 
-    val standardProfileType = classLoader
-        .loadClass("com.protonvpn.android.profiles.ui.ProfileType")
-        .enumValueOf("Standard")
+    val standardProfileType = ::profileTypeEnum.clazz.enumValueOf("Standard")
         ?: error("ProfileType.Standard not found")
-    ProfileAvailableTypesFingerprint.hookMethod {
-        before { param ->
-            param.result = arrayListOf<Any>(standardProfileType)
-        }
+    ::standardProfileStateConstructor.constructor.hookMethod {
+        before { param -> param.args[0] = arrayListOf<Any>(standardProfileType) }
     }
 
-    val getVpnCountries = ServerManager2GetVpnCountriesFingerprint.method
-    val getFreeCountries = getVpnCountries.declaringClass
-        .getDeclaredMethod("getFreeCountries", *getVpnCountries.parameterTypes)
-        .apply { isAccessible = true }
-    ProfileCountriesFingerprint.hookMethod(scopedHook(getVpnCountries) {
+    val getVpnCountries = ::serverManager2GetVpnCountriesFingerprint.method
+    val getFreeCountries = ::serverManager2GetFreeCountriesFingerprint.method.apply { isAccessible = true }
+    ::profileCountriesFingerprint.hookMethod(scopedHook(getVpnCountries) {
         before { param ->
             try {
                 param.result = getFreeCountries.invoke(param.thisObject, *param.args)
@@ -104,20 +120,20 @@ val UnlockVpnPlus = patch(
     })
 
     runCatching {
-        val getRandomServer = ServerManager2GetRandomServerFingerprint.method
-        val collectMethod = ChangeServerViewStateFlowCollectFingerprint.method
-        val freeStateField = collectMethod.declaringClass.findField("freeUserChangeServerState")
-        val flowCollect = classLoader.loadClass("kotlinx.coroutines.flow.Flow")
-            .getMethod("collect", *collectMethod.parameterTypes)
-        val distinctUntilChanged = runCatching {
-            classLoader.loadClass("kotlinx.coroutines.flow.FlowKt")
-                .getMethod("distinctUntilChanged", flowCollect.declaringClass)
-        }.getOrNull()
+        val getRandomServer = ::serverManager2GetRandomServerFingerprint.method
+        val serverManagerField = ::serverManager2ServerManagerField.field.apply { isAccessible = true }
+        val getExitCountries = ::serverManagerExitCountriesFingerprint.method.apply { isAccessible = true }
+
+        val collectMethod = ::changeServerViewStateFlowCollectFingerprint.method
+        val freeStateField = ::freeUserChangeServerStateField.field.apply { isAccessible = true }
+        // The repackaged kotlinx Flow interface is the one declaring collect's signature.
+        val flowCollect = collectMethod.declaringClass.interfaces.firstNotNullOf { flow ->
+            runCatching { flow.getMethod(collectMethod.name, *collectMethod.parameterTypes) }.getOrNull()
+        }
 
         collectMethod.hookMethod {
             before { param ->
-                var flow = freeStateField.get(param.thisObject) ?: return@before
-                distinctUntilChanged?.let { flow = it.invoke(null, flow) ?: flow }
+                val flow = freeStateField.get(param.thisObject) ?: return@before
                 try {
                     param.result = flowCollect.invoke(flow, *param.args)
                 } catch (e: InvocationTargetException) {
@@ -132,7 +148,9 @@ val UnlockVpnPlus = patch(
                 freeServersOnlyDepth.set(freeServersOnlyDepth.get()!! - 1)
                 val server = param.result
                 if (server == null || !serverClass.isInstance(server) || server.isFree()) return@after
-                pickRandomFreeServer(param.thisObject, isFreeServer)?.let { param.result = it }
+                val serverManager = serverManagerField.get(param.thisObject) ?: return@after
+                pickRandomFreeServer(serverManager, getExitCountries, getServerList, isFreeServer, getOnline)
+                    ?.let { param.result = it }
             }
         }
     }.onFailure { e ->
@@ -140,22 +158,27 @@ val UnlockVpnPlus = patch(
     }
 
     runCatching {
-        UpgradeOnboardingLaunchFingerprint.hookMethod(XC_MethodReplacement.DO_NOTHING)
+        ::upgradeOnboardingLaunchFingerprint.hookMethod(XC_MethodReplacement.DO_NOTHING)
     }.onFailure { e ->
         Logger.printInfo { "Proton VPN: UpgradeOnboardingLaunch not hooked, onboarding dialog not skipped: $e" }
     }
 }
 
-private fun pickRandomFreeServer(serverManager2: Any, isFreeServer: Method): Any? = runCatching {
-    val serverManager = serverManager2.getObjectField("serverManager")!!
-    val countries = serverManager.callMethod("getExitCountries", false) as List<*>
+private fun pickRandomFreeServer(
+    serverManager: Any,
+    getExitCountries: Method,
+    getServerList: Method,
+    isFreeServer: Method,
+    getOnline: Method,
+): Any? = runCatching {
+    val countries = getExitCountries.invoke(serverManager, false) as List<*>
     countries
         .mapNotNull { country ->
-            (country!!.callMethod("getServerList") as List<*>)
+            (getServerList.invoke(country) as List<*>)
                 .filter { server ->
                     server != null &&
                         isFreeServer.invoke(server) as Boolean &&
-                        server.callMethod("getOnline") as Boolean
+                        getOnline.invoke(server) as Boolean
                 }
                 .takeIf { it.isNotEmpty() }
         }
