@@ -29,6 +29,8 @@ private const val OFFLINE_VIDEO_FEATURE = "subscriptions_feature_offline_video"
 
 private const val DOWNLOADABLE_LABEL = ", isDownloadable="
 
+private const val MAX_VIDEO_TAB_HANDLERS = 4
+
 private fun MethodData.has(flag: AccessFlags) = (modifiers and flag.modifier) != 0
 
 private fun DexKitBridge.methodsUsing(vararg strings: String): List<MethodData> =
@@ -67,8 +69,15 @@ internal val videoTabDownloadHandlersFingerprint = findMethodListDirect {
                     it.paramCount == 0
             }
     }
-    if (matches.isEmpty()) matches
-    else requireCount("NewX video-tab download handlers", 2, matches) { it.descriptor }
+    // 12.30.0: legacy + new video tab = 2. Accept a small range so a tab being added or retired
+    // does not take the whole patch down; the filters above already pin the shape tightly.
+    if (matches.size > MAX_VIDEO_TAB_HANDLERS) {
+        throw Exception(
+            "Expected at most $MAX_VIDEO_TAB_HANDLERS NewX video-tab download handlers, found " +
+                "${matches.size}: ${matches.joinToString { it.descriptor }}",
+        )
+    }
+    matches
 }
 
 internal val handlerSubscriptionChecksFingerprint = findMethodListDirect {
@@ -127,7 +136,10 @@ internal val offlineVideoEnabledFingerprint = findMethodDirect {
 }
 
 private fun DexKitBridge.mediaToString(modelName: String): MethodData {
-    val matches = methodsUsing("$modelName(mediaId=").filter {
+    // Prefix match on "<ModelName>(" survives a renamed or reordered first property.
+    val matches = findMethod {
+        matcher { usingStrings(listOf("$modelName("), StringMatchType.StartsWith) }
+    }.filter {
         it.name == "toString" && it.paramCount == 0 && it.className.startsWith(MODELS_PACKAGE)
     }
     return requireCount("NewX $modelName toString()", 1, matches) { it.descriptor }.single()
