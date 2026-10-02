@@ -1,7 +1,9 @@
 package io.github.nexalloy.revanced.instagram.download
 
+import io.github.nexalloy.morphe.findMethodDirect
 import io.github.nexalloy.morphe.findMethodListDirect
 import org.luckypray.dexkit.DexKitBridge
+import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.result.MethodData
 import java.lang.reflect.Modifier
 
@@ -118,7 +120,9 @@ val carouselMediaGetterMethods = findMethodListDirect {
  * `Media`'s own is-this-a-video check.
  *
  * Found indirectly: the analytics method that logs `is_video` calls it, so the wrapper is
- * located by its logging strings and the boolean getter is taken from what it invokes.
+ * located by its logging strings. The wrapper also logs `is_carousel` from a sibling getter, so
+ * the getter is the `Media` boolean call whose result is logged under the "is_video" key, not
+ * simply the first one in the method (that only held while the log order stayed the same).
  */
 val isVideoMethods = findMethodListDirect {
     alwaysMatches() + findMethod {
@@ -126,13 +130,22 @@ val isVideoMethods = findMethodListDirect {
             returnType = "void"
             usingStrings("asl_session_id", "is_video", "is_carousel")
         }
-    }.flatMap { wrapper ->
-        wrapper.invokes.filter { invoked ->
-            invoked.paramCount == 0 &&
-                invoked.returnTypeName == "boolean" &&
+    }.mapNotNull { wrapper ->
+        var lastMediaFlag: MethodData? = null
+        var picked: MethodData? = null
+        for (insn in wrapper.instructions) {
+            val invoked = insn.methodRef
+            if (invoked != null && invoked.paramCount == 0 && invoked.returnTypeName == "boolean" &&
                 invoked.declaredClassName == MEDIA_CLASS
+            ) {
+                lastMediaFlag = invoked
+            } else if (insn.string == "is_video") {
+                picked = lastMediaFlag
+                break
+            }
         }
-    }
+        picked
+    }.distinctBy { it.descriptor }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -387,4 +400,19 @@ val storyOptionClickMethods = findMethodListDirect {
             usingStrings("[INTERNAL] Pause Playback")
         }
     }
+}
+
+/**
+ * `VideoUrlImpl(..., url: String, ...)` constructor (IG 449+ video-version model).
+ *
+ * Anchored on the constructor's own error message for a missing url. The url argument and the
+ * field it lands in are then resolved at runtime by the patch (see `VideoUrlProbe`).
+ */
+val videoUrlConstructorFingerprint = findMethodDirect {
+    findMethod {
+        matcher {
+            name = "<init>"
+            usingStrings(listOf("VideoUrl object with null url"), StringMatchType.Contains)
+        }
+    }.single()
 }

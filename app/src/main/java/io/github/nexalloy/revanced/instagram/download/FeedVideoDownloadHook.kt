@@ -95,11 +95,13 @@ class FeedVideoDownloadHook {
         } catch (ignored: Throwable) {
         }
 
-        // Load VideoVersionIntf (stable public interface with getUrl())
+        // Load VideoVersionIntf (public interface with getUrl()) on builds that still have it.
+        // IG 449+ dropped it; bindVideoUrlModel() then supplies VideoUrlImpl + its url field.
         try {
             val intf = classLoader.loadClass("com.instagram.model.mediasize.VideoVersionIntf")
+            val getUrl = intf.getMethod("getUrl")
             videoVersionIntfClass = intf
-            videoVersionGetUrl = intf.getMethod("getUrl")
+            videoVersionGetUrl = { obj -> getUrl.invoke(obj) }
         } catch (ignored: Throwable) {
         }
 
@@ -654,8 +656,28 @@ class FeedVideoDownloadHook {
         // VideoVersionIntf – stable public interface with getUrl()
         internal var videoVersionIntfClass: Class<*>? = null
 
-        /** VideoVersionIntf.getUrl() -> String */
-        internal var videoVersionGetUrl: Method? = null
+        /** Reads the CDN url of a [videoVersionIntfClass] instance (getter or field). */
+        internal var videoVersionGetUrl: ((Any?) -> Any?)? = null
+
+        /**
+         * IG 449+: the video-version model is `VideoUrlImpl` and its url getter was inlined by R8,
+         * so the url is read from the field the constructor stores it in (resolved by the patch).
+         * Only used when the legacy VideoVersionIntf interface is gone.
+         */
+        fun bindVideoUrlModel(modelClass: Class<*>, urlField: java.lang.reflect.Field) {
+            if (videoVersionIntfClass != null && videoVersionGetUrl != null) return
+            urlField.isAccessible = true
+            videoVersionIntfClass = modelClass
+            videoVersionGetUrl = { obj -> urlField.get(obj) }
+        }
+
+        /** Passive capture from the VideoUrlImpl constructor (replaces the getUrl() hook). */
+        fun onVideoUrlConstructed(url: Any?) {
+            if (!FeatureFlags.enablePostDownload) return
+            val value = url as? String ?: return
+            if (!isCdnMediaUrl(value)) return
+            rememberVideoUrl(value)
+        }
 
         // All () -> List candidates from MutableMediaDictIntf + its superinterfaces
         internal val carouselCandidates = ArrayList<Method>()

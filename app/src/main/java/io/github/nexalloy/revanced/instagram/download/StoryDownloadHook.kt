@@ -33,8 +33,14 @@ import java.util.IdentityHashMap
 object StoryDownloadHook {
 
     // VideoVersionIntf resolved once at install time — same interface used by feed downloader
-    private var videoVersionIntfClass: Class<*>? = null
-    private var videoVersionGetUrl: Method? = null
+    private var legacyVideoVersionClass: Class<*>? = null
+    private var legacyVideoVersionGetUrl: ((Any?) -> Any?)? = null
+
+    // Falls back to the model bound for the feed downloader (VideoUrlImpl on IG 449+).
+    private val videoVersionIntfClass: Class<*>?
+        get() = legacyVideoVersionClass ?: FeedVideoDownloadHook.videoVersionIntfClass
+    private val videoVersionGetUrl: ((Any?) -> Any?)?
+        get() = legacyVideoVersionGetUrl ?: FeedVideoDownloadHook.videoVersionGetUrl
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -55,8 +61,9 @@ object StoryDownloadHook {
     fun init(classLoader: ClassLoader) {
         try {
             val cls = classLoader.loadClass("com.instagram.model.mediasize.VideoVersionIntf")
-            videoVersionIntfClass = cls
-            videoVersionGetUrl = cls.getMethod("getUrl")
+            val getUrl = cls.getMethod("getUrl")
+            legacyVideoVersionClass = cls
+            legacyVideoVersionGetUrl = { obj -> getUrl.invoke(obj) }
         } catch (ignored: Throwable) {
         }
     }

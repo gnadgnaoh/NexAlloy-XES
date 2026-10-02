@@ -70,6 +70,15 @@ val MediaDownloadCore = patch {
     methodsOf(::videoVersionGetUrlMethods).forEach { getUrl ->
         getUrl.hookMethod { after { FeedVideoDownloadHook.onVideoUrlReturned(it) } }
     }
+
+    // IG 449+: VideoVersionIntf is gone and VideoUrlImpl has no url getter left after R8, so
+    // the url is captured where the model is built and read from its field during extraction.
+    runCatching {
+        val ctor = ::videoUrlConstructorFingerprint.constructor
+        val urlArg = VideoUrlProbe.urlArgIndex(ctor)
+        FeedVideoDownloadHook.bindVideoUrlModel(ctor.declaringClass, VideoUrlProbe.urlField(ctor, urlArg))
+        ctor.hookMethod { after { FeedVideoDownloadHook.onVideoUrlConstructed(it.args[urlArg]) } }
+    }.onFailure { Logger.printInfo { "MediaDownloadCore: VideoUrlImpl model not bound: $it" } }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
