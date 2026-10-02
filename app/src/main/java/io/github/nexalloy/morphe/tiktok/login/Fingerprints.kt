@@ -13,7 +13,6 @@ val mandatoryLoginGatesFingerprint = findMethodListDirect {
     }.findMethod {
         matcher {
             returnType = "boolean"
-            paramTypes("boolean")
         }
     }.filter { it.name in MANDATORY_LOGIN_GATES }
 }
