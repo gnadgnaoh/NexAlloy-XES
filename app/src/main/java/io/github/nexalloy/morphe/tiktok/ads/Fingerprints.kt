@@ -77,7 +77,7 @@ private fun DexKitBridge.notFoundMarker(): List<MethodData> = runCatching {
 }.getOrDefault(emptyList())
 
 /** Runs [find] and turns an empty or failed result into something the cache can store. */
-private fun DexKitBridge.cacheable(find: DexKitBridge.() -> List<MethodData>): List<MethodData> =
+internal fun DexKitBridge.cacheable(find: DexKitBridge.() -> List<MethodData>): List<MethodData> =
     runCatching { find() }.getOrDefault(emptyList()).ifEmpty { notFoundMarker() }
 
 /** Drops [notFoundMarker] from a resolved result, leaving only real matches. */

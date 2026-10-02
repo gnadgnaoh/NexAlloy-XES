@@ -15,9 +15,12 @@ private const val TAG = "[TikTok ads]"
  * predicates on. Hook points are independent: one that no longer resolves after a TikTok update
  * is logged and skipped, the patch only fails when the For You response hook itself is gone.
  *
- * Split installs (Play Store / APKM bundles of the Asia build): NexAlloy's DexKit scans base.apk
- * only, so code living in feature splits (Following feed, detail pager) is resolved by its kept
- * class name at runtime first.
+ * Split installs: TikTok is scanned with DexSource.APK_WITH_SPLITS (base.apk + installed feature
+ * splits such as df_a_dex). Code living in feature splits (Following feed, detail pager) is still
+ * resolved by its kept class name at runtime first, which also covers installs without the split.
+ *
+ * [AwemeAdFilter] decides what is removed: sponsored videos ([RemoveFeedAds]), promoted-music
+ * videos ([HidePromotedMusicVideos]) and TikTok Shop cards ([HideShopAds]).
  */
 internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
     AwemeAdFilter.init(classLoader)
