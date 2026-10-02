@@ -21,7 +21,7 @@
 | **Gmail** | `com.google.android.gm` | Hide inbox ads |
 | **Google (Discover)** | `com.google.android.googlequicksearchbox` | Filter Discover feed ads |
 | **Google Photos** | `com.google.android.apps.photos` | Spoof Pixel XL (unlimited backup), Enable DCIM folder backup control |
-| **Instagram** | `com.instagram.android` | Hide ads, Sanitize tracking links, Block network telemetry, Ghost mode (story, live, DM read receipts, typing status, screenshot notification block, keep ephemeral media, permanent view), Allow screenshots, Anti-revoke (save deleted DMs) |
+| **Instagram** | `com.instagram.android` | Hide ads, Sanitize tracking links, Block network telemetry, Ghost mode (story, live, DM read receipts, typing status, screenshot notification block, keep ephemeral media, permanent view), Allow screenshots, Anti-revoke (save deleted DMs), Download (posts, profile pictures, reels, stories) |
 | **Photomath** | `com.microblink.photomath` | Unlock Plus |
 | **Proton VPN** | `ch.protonvpn.android` | Unlock VPN Plus UI, Remove change server delay, Disable telemetry |
 | **Reddit** | `com.reddit.frontpage` | Hide ads, Sanitize sharing links |
@@ -33,7 +33,6 @@
 | **Twitter / X** | `com.twitter.android` | Remove ads, Hide recommendations, Direct URLs (unshorten `t.co`), Remove Premium upsell, Force enable translate, Show poll results, Hide banner, Disable blur effects |
 | **YouTube** | `com.google.android.youtube` | Remove ads, SponsorBlock, Background playback, Sanitize share links, Navigation bar, Swipe controls, Video quality options, Custom playback speed, Copy video URL, External downloader integration, Hide layout components & action buttons, Disable Shorts resuming, Force original audio, Disable video codecs, Auto captions toggle, Alternative thumbnails (DeArrow), Bypass image region restrictions, In-app settings |
 | **YouTube Music** | `com.google.android.apps.youtube.music` | Remove music ads, Background playback, Enable exclusive audio playback, Hide upgrade button & Premium labels, Sanitize sharing links, Media session crash fix, In-app settings |
-<<<<<<< HEAD
 | **Zalo** | `com.zing.zalo` | Hide feed ads (ZInstant), Skip feed ads binding, Filter feed ads, Hide story ads, Hide Zalo Video ads, Block Adtima ad & video ad requests, Disable ads tracking, Call recording |
 
 ---
@@ -75,6 +74,7 @@
   - Force permanent view on view-once media.
 - **Screenshot permission**: Allows taking screenshots in secure / protected views.
 - **Save deleted messages**: Anti-revoke hook preserving deleted/unsent DMs in chat thread.
+- **Download:** Download posts, profile pictures, reels, and stories.
 
 ### Photomath (`com.microblink.photomath`)
 - **Unlock Plus**: Unlocks Photomath Plus features including step-by-step problem solutions and textbook explanations.
