@@ -7,10 +7,10 @@ val DisableTelemetry = patch(
     name = "Disable telemetry",
     description = "Blocks all telemetry, analytics, and observability data collection.",
 ) {
-    // enqueue is void; the other two are suspend functions returning Unit.
-    listOf(
-        TelemetryWorkerEnqueueFingerprint,
-        SendObservabilityFingerprint,
-        VpnTelemetryAddEventFingerprint,
-    ).forEach { it.hookMethod(XC_MethodReplacement.returnConstant(Unit)) }
+    // Enqueue methods are void; the other two are suspend functions returning Unit.
+    ::telemetryWorkerEnqueueFingerprints.dexMethodList.forEach {
+        it.hookMethod(XC_MethodReplacement.returnConstant(null))
+    }
+    ::sendObservabilityFingerprint.hookMethod(XC_MethodReplacement.returnConstant(Unit))
+    ::vpnTelemetryAddEventFingerprint.hookMethod(XC_MethodReplacement.returnConstant(Unit))
 }
