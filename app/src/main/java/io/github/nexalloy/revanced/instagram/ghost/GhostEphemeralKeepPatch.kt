@@ -27,6 +27,8 @@ val GhostEphemeralKeep = patch(
                 clearExpiryTimestamp(param.thisObject)
                 val result = param.result
                 if (result != null && result !== param.thisObject) clearExpiryTimestamp(result)
+                // Static `void A00(reader, target)` parsers fill an argument instead.
+                param.args.forEach { arg -> if (arg != null && arg !== result) clearExpiryTimestamp(arg) }
             }
         }
     }

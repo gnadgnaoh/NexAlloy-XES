@@ -16,10 +16,12 @@ val GhostPermanentView = patch(
 
     // Also hook the broader parseFromJson fingerprint (Piko's primary target):
     // strings "url_expire_at_secs" + "view_mode" + "seen_count" + "tap_models"
+    // `static void A00(reader, target)`: it fills `target` and returns nothing, so the
+    // parsed object is one of the arguments (makeEphemeralPermanent ignores anything else).
     ::ephemeralMediaJsonParserFingerprint.hookMethod {
         after { param ->
-            val result = param.result ?: return@after
-            makeEphemeralPermanent(result)
+            param.result?.let { makeEphemeralPermanent(it) }
+            param.args.forEach { arg -> if (arg != null) makeEphemeralPermanent(arg) }
         }
     }
 }

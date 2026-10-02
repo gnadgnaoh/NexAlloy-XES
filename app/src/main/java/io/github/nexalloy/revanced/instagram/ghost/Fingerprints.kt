@@ -4,6 +4,21 @@ import io.github.nexalloy.morphe.AccessFlags
 import io.github.nexalloy.morphe.accessFlags
 import io.github.nexalloy.morphe.findMethodDirect
 import io.github.nexalloy.morphe.findMethodListDirect
+import org.luckypray.dexkit.result.MethodData
+import java.lang.reflect.Modifier
+
+/*
+ * Rules used below (IG 449 checks in comments):
+ * - String anchors come first; a shape (return type / params) is kept only where it is what
+ *   tells the target apart, otherwise it is just one more thing an update can break.
+ * - `.single()` instead of `.first()`: these hooks block or rewrite the method, so a second
+ *   candidate must fail loudly instead of silently hooking the wrong one.
+ * - Instagram has "string pool" methods (`static String A00(int)`, one giant switch over
+ *   thousands of literals) that match almost any usingStrings query; they are never targets.
+ */
+private fun MethodData.isStringPool(): Boolean =
+    Modifier.isStatic(modifiers) && returnTypeName == "java.lang.String" &&
+        paramTypeNames == listOf("int")
 
 val screenshotFingerprint = findMethodDirect {
     val classNames = findClass {
@@ -48,14 +63,14 @@ val storySeenFingerprint = findMethodDirect {
     }
 }
 
+/** The only user of "mark_thread_seen-" (449: the static/arity filters were redundant). */
 val seenStateFingerprint = findMethodDirect {
     findMethod {
         matcher {
             usingStrings("mark_thread_seen-")
             returnType = "void"
-            modifiers(AccessFlags.STATIC.modifier or AccessFlags.FINAL.modifier)
         }
-    }.first { m -> m.paramTypeNames.size >= 3 }
+    }.filterNot { it.isStringPool() }.single()
 }
 
 val typingStatusFingerprint = findMethodDirect {
@@ -63,10 +78,8 @@ val typingStatusFingerprint = findMethodDirect {
         matcher {
             usingStrings("is_typing_indicator_enabled", "indicate_activity")
             returnType = "void"
-            paramCount = 1
-            accessFlags(AccessFlags.FINAL)
         }
-    }.first()
+    }.filterNot { it.isStringPool() }.single()
 }
 
 val ephemeralMediaJsonParserFingerprint = findMethodDirect {
@@ -74,45 +87,51 @@ val ephemeralMediaJsonParserFingerprint = findMethodDirect {
         matcher {
             usingStrings("url_expire_at_secs", "view_mode", "seen_count", "tap_models")
             returnType = "void"
-            paramCount = 2
+            paramCount = 2 // needed: unsafeParseFromJson uses the same strings
         }
-    }.first()
+    }.single()
 }
 
 val ephemeralVanishLocalDeleteFingerprint = findMethodDirect {
     findMethod {
         matcher {
             usingStrings("igThreadIgid")
-            paramTypes("com.instagram.model.direct.DirectThreadKey", "boolean")
+            paramTypes("com.instagram.model.direct.DirectThreadKey", "boolean") // needed: 3 users of the string
             returnType = "void"
         }
-    }.first()
+    }.single()
 }
 
 val ephemeralServerPingFingerprint = findMethodDirect {
     findMethod {
         matcher {
             usingStrings("mark_ephemeral_item_ranges_viewed")
-            returnType = "void"
+            returnType = "void" // needed: 5 users of the string
         }
-    }.first()
+    }.single()
 }
 
+/** Parsers of "message_expiration_timestamp_ms" (string pools excluded). */
 val ephemeralExpiryParserFingerprintList = findMethodListDirect {
     findMethod {
         matcher {
             usingStrings("message_expiration_timestamp_ms")
         }
-    }
+    }.filterNot { it.isStringPool() }
 }
 
+/**
+ * The ephemeral media JSON entry point, `unsafeParseFromJson(reader)` (a kept interface name).
+ * 449: matching the strings alone also hit the string pool `X/0000.A00(int)`, which the old
+ * `.first { returnType != void }` picked, so the hook never saw a media object.
+ */
 val permanentViewModeFingerprint = findMethodDirect {
     findMethod {
         matcher {
+            name = "unsafeParseFromJson"
             usingStrings("view_mode", "tap_models")
-            paramCount = 1
         }
-    }.first { m -> m.returnTypeName != "void" }
+    }.single()
 }
 
 val replayUpdateFingerprint = findMethodDirect {
