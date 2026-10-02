@@ -14,6 +14,8 @@ import io.github.nexalloy.revanced.facebook.hookAudienceNetworkRewardFallbacks
 import io.github.nexalloy.revanced.facebook.hookFeedCsrFilterInput
 import io.github.nexalloy.revanced.facebook.hookGameAdActivityLaunchFallbacks
 import io.github.nexalloy.revanced.facebook.hookGameAdBridge
+import io.github.nexalloy.revanced.facebook.hookGameAdJavascriptInterfaceWatcher
+import io.github.nexalloy.revanced.facebook.hookGameAdScriptDeliveries
 import io.github.nexalloy.revanced.facebook.hookGameAdRequest
 import io.github.nexalloy.revanced.facebook.hookGameAdResultMethods
 import io.github.nexalloy.revanced.facebook.hookGameAdServiceDispatchMethods
@@ -67,6 +69,13 @@ import java.lang.reflect.Method
  *  - Adds hookAudienceNetworkRewardFallbacks (reward completion callbacks)
  *  - Sets RESULT_OK (not RESULT_CANCELED) when finishing game ad activities
  *  - Changes storyAdsInDisc search string to "ads_deletion"
+ *
+ * Synced with upstream FacebookAppAdsRemover 1.21 — game ads only:
+ *  - rewarded + banner messages resolved as SUCCESS (reward granted) instead of ADS_UNAVAILABLE
+ *  - WebView.addJavascriptInterface watcher for runtime game bridges
+ *  - evaluateJavascript / loadUrl / postWebMessage promise-delivery rewrite
+ *  - (upstream's always-on addView / onResume surface sweeps stay OFF here — battery)
+ *  - Reels shopping-card hook removed, as upstream did
  *
  * Synced with upstream FacebookAppAdsRemover 1.15 (2026-09):
  *  - processNewStories SPONSORED filter and Litho feed component guard
@@ -285,6 +294,16 @@ val HideFacebookAds = patch(
         runCatching { hookGameAdServiceDispatchMethods(bridgeClass) }
     }
 
+    // ── 10b. Runtime bridges + promise-delivery rewrite (upstream 1.21) ───────
+    //
+    // Neither needs DexKit. The watcher hooks every JS delegate a game webview registers
+    // (the one it really talks to is often not the DexKit-found class); the delivery hooks
+    // rewrite the promise JSON sent back into the webview so a rewarded request settles as
+    // "watched" even when the answer bypasses the bridge helpers hooked above.
+
+    runCatching { hookGameAdJavascriptInterfaceWatcher() }
+    runCatching { hookGameAdScriptDeliveries() }
+
     // ── 11. Audience Network reward fallbacks ─────────────────────────────────
 
     runCatching { hookAudienceNetworkRewardFallbacks(classLoader) }
@@ -350,12 +369,16 @@ val HideFacebookAds = patch(
     }
     gameAdUiHooked.values.forEach { method -> runCatching { hookPlayableAdActivity(method) } }
 
+    // Kept disabled on purpose (battery): a global Activity.onResume hook plus a recursive
+    // view sweep on every resume. The per-class AN / Neko hooks above already close ads.
     // runCatching { hookGlobalGameAdActivityLifecycleFallback() }
 
     runCatching { hookGameAdActivityLaunchFallbacks() }
 
     // ── 13. Native ad view / WebView surface fallbacks ────────────────────────
 
+    // Kept disabled on purpose (battery): hooks ViewGroup.addView, TextView.setText,
+    // View.setContentDescription and WebView loads app-wide.
     // runCatching { hookGlobalGameAdSurfaceFallbacks() }
 
     // ── 14. ProfileReelsAsyncAdsQuery dispatch block ────────────────────
