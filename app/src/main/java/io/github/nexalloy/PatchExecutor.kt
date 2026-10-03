@@ -141,6 +141,13 @@ class SharedPrefCache(app: Application) : DexKitCacheBridge.Cache {
     }
 }
 
+class FingerprintNotFoundException(
+    key: String, cause: Throwable?
+) : Exception(
+    "Fingerprint $key not found" + (cause?.let { ": ${it.javaClass.simpleName}: ${it.message}" } ?: ""),
+    cause,
+)
+
 class DependedHookFailedException(
     subHookName: String, exception: Throwable
 ) : Exception("Depended hook $subHookName failed.", exception)
@@ -175,6 +182,13 @@ class PatchExecutor(
     private fun openDexKit() = when (dexSource) {
         DexSource.CLASS_LOADER -> DexKitCacheBridge.create(lpparam.packageName, classLoader)
         DexSource.APK_PATH -> DexKitCacheBridge.create("", lpparam.applicationInfo.sourceDir)
+        DexSource.APK_WITH_SPLITS ->
+            if (lpparam.applicationInfo.splitSourceDirs.isNullOrEmpty()) {
+                DexKitCacheBridge.create("", lpparam.applicationInfo.sourceDir)
+            } else {
+                // The default class loader already holds base.apk + installed (non-isolated) splits.
+                DexKitCacheBridge.create(lpparam.packageName, classLoader)
+            }
     }
 
     private var dexkit = openDexKit()
@@ -390,6 +404,7 @@ class PatchExecutor(
     private inline fun <reified T : Any> wrapFind(
         key: String,
         crossinline funcFunc: DexKitBridge.() -> T,
+        crossinline onError: (Throwable) -> Unit = {},
         crossinline serializer: (T) -> String
     ): DexKitBridge.() -> T? {
         return {
@@ -397,6 +412,7 @@ class PatchExecutor(
                 funcFunc().also { Logger.printInfo { "$key Matches: ${serializer(it)}" } }
             } catch (e: Exception) {
                 Logger.printInfo({ "Fingerprint $key Not Found" }, e)
+                onError(e)
                 null
             }
         }
@@ -421,15 +437,27 @@ class PatchExecutor(
 
     private inline fun getDexClass(
         key: String, crossinline findFunc: DexKitBridge.() -> ClassData
-    ): DexClass = dexkit.getClassDirectOrNull(key, wrapFind(key, findFunc) { it.descriptor })!!
+    ): DexClass {
+        var failure: Throwable? = null
+        return dexkit.getClassDirectOrNull(key, wrapFind(key, findFunc, { failure = it }) { it.descriptor })
+            ?: throw FingerprintNotFoundException(key, failure)
+    }
 
     private inline fun getDexMethod(
         key: String, crossinline findFunc: DexKitBridge.() -> MethodData
-    ): DexMethod = dexkit.getMethodDirectOrNull(key, wrapFind(key, findFunc) { it.descriptor })!!
+    ): DexMethod {
+        var failure: Throwable? = null
+        return dexkit.getMethodDirectOrNull(key, wrapFind(key, findFunc, { failure = it }) { it.descriptor })
+            ?: throw FingerprintNotFoundException(key, failure)
+    }
 
     private inline fun getDexField(
         key: String, crossinline findFunc: DexKitBridge.() -> FieldData
-    ): DexField = dexkit.getFieldDirectOrNull(key, wrapFind(key, findFunc) { it.descriptor })!!
+    ): DexField {
+        var failure: Throwable? = null
+        return dexkit.getFieldDirectOrNull(key, wrapFind(key, findFunc, { failure = it }) { it.descriptor })
+            ?: throw FingerprintNotFoundException(key, failure)
+    }
 
     private inline fun getDexMethods(
         key: String, crossinline findFunc: DexKitBridge.() -> List<MethodData>
