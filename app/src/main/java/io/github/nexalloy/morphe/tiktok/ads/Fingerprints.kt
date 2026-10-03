@@ -9,7 +9,7 @@ import org.luckypray.dexkit.DexKitBridge
 import java.lang.reflect.Modifier
 import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.result.MethodData
-import org.luckypray.dexkit.wrap.DexMethod
+import io.github.nexalloy.morphe.tiktok.shared.cacheable
 
 /*
  * Verified with DexKit against TikTok Asia 46.8.3 (base.apk) and TikTok Global 46.9.1 (55 dex).
@@ -30,61 +30,8 @@ internal const val TALENT_AD_RESULT_CLASS =
 
 private val MethodData.isConcrete get() = modifiers and AccessFlags.ABSTRACT.modifier == 0
 
-// region "not found" caching
-
-/*
- * Why every fingerprint in this file goes through [cacheable].
- *
- * Several hook points here legitimately resolve to nothing on a given install: a feature split
- * whose base.apk does not contain DetailFragment, a profile filter TikTok has not copied into that
- * build yet, a log string that was renamed. DexKit does cache such a result, but it caches it as
- * an *empty* list, which SharedPrefCache stores as "" and reads back as "nothing cached"
- * (`takeIf(String::isNotBlank)`). Single-method fingerprints are worse: the default
- * CacheFailurePolicy.NONE never records a miss at all.
- *
- * So every unresolved hook point re-ran its query on every cold start - and because the DexKit
- * bridge is created lazily on the first cache miss, a single one of them re-opened and re-parsed
- * TikTok's 55 dex files. That is what kept startup at ~10s even right after a force close.
- *
- * Fixing this in SharedPrefCache would change caching for every app the module patches, so it is
- * handled here instead, for TikTok's ad hooks only: "found nothing" is recorded as a one-entry
- * list holding a marker method, which caches like any ordinary result. The next launch is then a
- * SharedPreferences read, the bridge is never created, and [realMatches] drops the marker again
- * before anything is hooked.
- */
-
-/**
- * A no-argument method declared on the Aweme Gson model, preferring `isAd()` - the very method
- * [AwemeAdFilter] already relies on. No fingerprint in this file can resolve to a no-argument
- * method of Aweme (they all require parameters, or pin the declaring class elsewhere), so the
- * marker can always be told apart from a real match.
- */
-private fun DexKitBridge.notFoundMarker(): List<MethodData> = runCatching {
-    findMethod {
-        matcher {
-            declaredClass = AWEME_CLASS
-            name = "isAd"
-            paramCount = 0
-        }
-    }.ifEmpty {
-        findMethod {
-            matcher {
-                declaredClass = AWEME_CLASS
-                paramCount = 0
-            }
-        }
-    }.take(1)
-}.getOrDefault(emptyList())
-
-/** Runs [find] and turns an empty or failed result into something the cache can store. */
-private fun DexKitBridge.cacheable(find: DexKitBridge.() -> List<MethodData>): List<MethodData> =
-    runCatching { find() }.getOrDefault(emptyList()).ifEmpty { notFoundMarker() }
-
-/** Drops [notFoundMarker] from a resolved result, leaving only real matches. */
-internal fun List<DexMethod>.realMatches(): List<DexMethod> =
-    filterNot { it.className == AWEME_CLASS && it.paramTypeNames.isEmpty() }
-
-// endregion
+// Every fingerprint in this file goes through `cacheable` (shared/CachedLookup.kt), so a hook point
+// missing from a build is cached as "not found" instead of re-opening DexKit on every cold start.
 
 // region For You
 

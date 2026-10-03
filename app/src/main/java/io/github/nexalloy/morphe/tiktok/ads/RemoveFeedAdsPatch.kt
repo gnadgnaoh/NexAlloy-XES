@@ -8,6 +8,7 @@ import io.github.nexalloy.findClassOrNull
 import io.github.nexalloy.getObjectFieldOrNull
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
+import io.github.nexalloy.morphe.tiktok.shared.realMatches
 import io.github.nexalloy.setObjectField
 
 private const val TAG = "[TikTok ads]"

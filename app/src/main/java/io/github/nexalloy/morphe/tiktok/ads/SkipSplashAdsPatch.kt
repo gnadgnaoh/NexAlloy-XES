@@ -7,6 +7,7 @@ import de.robv.android.xposed.XC_MethodReplacement
 import io.github.nexalloy.findClassOrNull
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
+import io.github.nexalloy.morphe.tiktok.shared.realMatches
 
 private const val TAG = "[TikTok splash]"
 
