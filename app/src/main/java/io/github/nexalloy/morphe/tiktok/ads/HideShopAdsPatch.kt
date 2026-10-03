@@ -11,7 +11,8 @@ private const val TAG = "[TikTok Shop]"
  * "Not interested" / "Claim" buttons). They are not sponsored videos - Aweme.isAd() is false -
  * so [RemoveFeedAds] keeps them; this patch can be switched on and off on its own.
  *
- * Two independent layers (see ShopFingerprints.kt for how a card reaches the feed):
+ * Two independent layers (see the "TikTok Shop" region of Fingerprints.kt for how a card reaches
+ * the feed):
  *  1. Request: the Shop provider's request builder returns no card type, so TikTok does not ask
  *     the server for Shop cards in the first place.
  *  2. Feed: every feed hook of [TikTokFeedFilterHooks] (For You response, inserted items, cold-start
