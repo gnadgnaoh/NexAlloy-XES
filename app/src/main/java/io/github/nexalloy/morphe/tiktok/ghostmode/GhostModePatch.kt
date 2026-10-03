@@ -42,7 +42,6 @@ val GhostMode = patch(
     name = "Ghost mode",
     description = "Stops TikTok from reporting what you look at: story views, profile visits and " +
         "the typing indicator. Your online status is unchanged.",
-    use = false,
 ) {
     val installed = mutableListOf<String>()
     val skipped = mutableListOf<String>()
