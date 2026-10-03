@@ -1,11 +1,29 @@
 package io.github.nexalloy.morphe.tiktok.screencapture
 
 import android.app.Activity
+import android.content.Context
 import app.morphe.extension.shared.Logger
+import de.robv.android.xposed.XC_MethodReplacement
+import io.github.nexalloy.findClassOrNull
 import io.github.nexalloy.hookMethod
+import io.github.nexalloy.morphe.tiktok.shared.realMatches
 import io.github.nexalloy.patch
 
 private const val TAG = "[TikTok screen capture]"
+
+private val SCREENSHOT_TASKS = listOf(
+    "com.ss.android.ugc.aweme.legoImpl.task.ScreenShotTask",
+    "com.ss.android.ugc.aweme.legoImp.task.ScreenShotTaskHolder\$BootFinish",
+    "com.ss.android.ugc.aweme.legoImpl.task.ScreenShotFeedbackTask",
+    "com.ss.android.ugc.aweme.legoImp.task.ScreenShotFeedbackTaskHolder\$BootFinish",
+    "com.ss.android.ugc.aweme.legoImp.task.ScreenRecordingMonitorInitTask",
+    "com.ss.android.ugc.aweme.im.sharepanel.impl.screenshotshare.InternalShareScreenshotTask",
+    "com.ss.android.ugc.aweme.im.sharepanel.impl.screenshotshare.InternalShareScreenshotTaskHolder\$BootFinish",
+)
+
+private const val SCREENSHOT_FEEDBACK_SERVICE =
+    "com.ss.android.ugc.aweme.feedback.screenshot.ScreenShotFeedbackService"
+private val SCREENSHOT_FEEDBACK_TRIGGERS = setOf("onShot", "tryShowScreenShotFloatingView")
 
 val DisableScreenCaptureDetection = patch(
     name = "Disable screen capture detection",
@@ -34,11 +52,36 @@ val DisableScreenCaptureDetection = patch(
     }
 
     optional("clearModeDisplayListener") {
-        listOf(ClearModeDisplayAddedFingerprint, ClearModeDisplayRemovedFingerprint).forEach { fingerprint ->
-            fingerprint.hookMethod {
-                before { param -> param.result = null }
-            }
+        val listeners = ::clearModeDisplayListenerFingerprints.dexMethodList.realMatches()
+        check(listeners.isNotEmpty()) { "ClearModePanelComponent display listener not found" }
+        listeners.forEach { it.toMethod().hookMethod(XC_MethodReplacement.DO_NOTHING) }
+    }
+
+    // From kveld "Bypass Screen Capture Detection" (GPL-3.0): the startup tasks that register
+    // TikTok's own screenshot observer (the MediaStore watcher used below Android 14), the
+    // screenshot feedback prompt, the "share screenshot" panel and the screen recording monitor.
+    // Lego task classes keep their names; run(Context) is the task interface.
+    optional("screenshotTasks") {
+        val hooked = SCREENSHOT_TASKS.count { name ->
+            val task = name.findClassOrNull(classLoader) ?: return@count false
+            val run = runCatching { task.getDeclaredMethod("run", Context::class.java) }.getOrNull()
+                ?: return@count false
+            run.hookMethod(XC_MethodReplacement.DO_NOTHING)
+            true
         }
+        check(hooked > 0) { "none of the ${SCREENSHOT_TASKS.size} screenshot tasks found" }
+    }
+
+    // The prompt itself, should the feedback service be started some other way. Both are
+    // IScreenShotFeedbackService methods, so they keep their names.
+    optional("screenshotFeedback") {
+        val service = SCREENSHOT_FEEDBACK_SERVICE.findClassOrNull(classLoader)
+            ?: error("$SCREENSHOT_FEEDBACK_SERVICE not found")
+        val methods = service.declaredMethods.filter {
+            it.name in SCREENSHOT_FEEDBACK_TRIGGERS && it.returnType == Boolean::class.javaPrimitiveType
+        }
+        check(methods.isNotEmpty()) { "no screenshot feedback trigger found" }
+        methods.forEach { it.hookMethod(XC_MethodReplacement.returnConstant(false)) }
     }
 
     check(installed.isNotEmpty()) { "no screen capture detection could be disabled: ${skipped.joinToString("; ")}" }
