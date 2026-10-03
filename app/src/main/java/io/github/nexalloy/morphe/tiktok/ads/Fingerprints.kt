@@ -351,3 +351,102 @@ val ecSearchCardTypeGetterFingerprints = findMethodListDirect {
 }
 
 // endregion
+
+// region Splash and other ad routes
+
+/*
+ * Ads that never travel through the For You list, ported from HushFeed ("Skip the splash ad",
+ * Feed filter routes) and kveld ("Instant Launch & Splash Blocker"), re-anchored for DexKit.
+ * Verified against TikTok Asia 47.0.3 and TikTok Global 47.1.4, each with its df_a_dex split.
+ * Classes with kept names (splash tasks, MidAdComponent, SearchMixFeedList, FriendsFeedResponse,
+ * DramaBlockingAdServiceImpl) are hooked by name in the patches; only methods whose names R8
+ * changes on every build are fingerprinted here, by their log strings or kept-name fields.
+ */
+
+internal const val MID_AD_COMPONENT_CLASS = "com.ss.android.ugc.feed.platform.panel.midad.MidAdComponent"
+internal const val FRIENDS_FEED_RESPONSE_CLASS = "com.ss.android.ugc.aweme.friendstab.api.FriendsFeedResponse"
+internal const val SEARCH_MIX_FEED_LIST_CLASS =
+    "com.ss.android.ugc.aweme.search.pages.result.topsearch.core.model.SearchMixFeedList"
+internal const val DRAMA_BLOCKING_AD_SERVICE_CLASS = "com.ss.android.ugc.aweme.impl.DramaBlockingAdServiceImpl"
+
+/**
+ * Log lines of the splash ad show manager's decision `(launchType: Int, Context): Boolean`, where
+ * launch type 1 is a cold start and 2 a return from the background (LX/05Sz.LJI on Asia 47.0.3,
+ * LX/05W5.LJI on Global 47.1.4). Each of them is only used by that method; any one is enough.
+ */
+private val SPLASH_DECISION_LOGS = listOf(
+    "coldShowSplash has splash",
+    "coldHasSplash = ",
+    "warmCanShowTopView has no splash",
+    "warmCanShowTopView false, splashCheck=false",
+)
+
+/** Whether a splash (or TopView) ad is shown now, for both cold and warm starts. */
+val splashShowDecisionFingerprints = findMethodListDirect {
+    cacheable {
+        SPLASH_DECISION_LOGS
+            .flatMap { log ->
+                findMethod {
+                    matcher {
+                        usingStrings(listOf(log), StringMatchType.Equals)
+                        returnType = "boolean"
+                    }
+                }
+            }
+            .distinctBy { it.descriptor }
+    }
+}
+
+/**
+ * MidAdComponent's splice: finds the video on screen in the pager adapter and puts a mid-roll ad
+ * in its place, after every list hook has already run. Its only `midroll_ads_show` user; the
+ * method name changes per build (`Dq` / `uq`).
+ */
+val midRollAdSpliceFingerprints = findMethodListDirect {
+    cacheable {
+        findMethod {
+            matcher {
+                declaredClass = MID_AD_COMPONENT_CLASS
+                usingStrings(listOf("midroll_ads_show"), StringMatchType.Equals)
+                returnType = "void"
+            }
+        }
+    }
+}
+
+/**
+ * TikTok's answer to "should this creator's video pager ask /ad/profile_page/ for ads"
+ * (`static (User): Boolean`, reads the `profile_ad_experiment` setting). The other user of the
+ * string is the void method registering the setting.
+ */
+val profileAdEligibilityFingerprints = findMethodListDirect {
+    cacheable {
+        findMethod {
+            matcher {
+                usingStrings(listOf("profile_ad_experiment"), StringMatchType.Equals)
+                returnType = "boolean"
+            }
+        }
+    }
+}
+
+/**
+ * Where a fetched Friends tab page is delivered: the `onSuccess(Object)` callback that reads
+ * `FriendsFeedResponse.friendFeedData` (field and callback keep their names; the class is R8's).
+ */
+val friendsFeedSuccessFingerprints = findMethodListDirect {
+    cacheable {
+        findField {
+            matcher {
+                declaredClass = FRIENDS_FEED_RESPONSE_CLASS
+                name = "friendFeedData"
+            }
+        }.firstOrNull()
+            ?.readers
+            ?.filter { it.name == "onSuccess" && it.isConcrete }
+            ?.distinctBy { it.descriptor }
+            .orEmpty()
+    }
+}
+
+// endregion

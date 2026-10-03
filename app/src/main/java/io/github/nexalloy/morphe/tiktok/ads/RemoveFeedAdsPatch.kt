@@ -5,8 +5,10 @@ import io.github.nexalloy.IHookCallback
 import io.github.nexalloy.PatchExecutor
 import io.github.nexalloy.callMethodOrNull
 import io.github.nexalloy.findClassOrNull
+import io.github.nexalloy.getObjectFieldOrNull
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
+import io.github.nexalloy.setObjectField
 
 private const val TAG = "[TikTok ads]"
 
@@ -129,15 +131,83 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
 
     optional("followingFeed") { hookFollowingFeed() }
 
+    // region Ads outside the For You list (routes from HushFeed / kveld)
+
+    // Mid-roll: puts an ad in place of the video on screen after every list hook has run.
+    // Everything it splices is an ad by construction, so the splice is skipped and the video stays.
+    optional("midRollAds") {
+        val splices = ::midRollAdSpliceFingerprints.dexMethodList.realMatches()
+        check(splices.isNotEmpty()) { "MidAdComponent splice not found" }
+        splices.forEach {
+            it.hookMethod {
+                before { param ->
+                    if (!AwemeAdFilter.hideAds) return@before
+                    param.result = null
+                    logRemoved("midRollAd", 1)
+                }
+            }
+        }
+    }
+
+    // A creator's video pager requests its own ads from /tiktok/v1/ad/profile_page/ and splices
+    // them between the creator's videos; answering "not eligible" means the request is never sent.
+    optional("profilePagerAds") {
+        val gates = ::profileAdEligibilityFingerprints.dexMethodList.realMatches()
+        check(gates.isNotEmpty()) { "profile_ad_experiment gate not found" }
+        gates.forEach {
+            it.hookMethod {
+                after { param -> if (AwemeAdFilter.hideAds && param.result == true) param.result = false }
+            }
+        }
+    }
+
+    // Search grid: results are SearchMixFeed cards, stamped with the request id before anything
+    // reads them; the card list is replaced by its ad-free copy right there.
+    optional("searchAds") {
+        val results = SEARCH_MIX_FEED_LIST_CLASS.findClassOrNull(classLoader) ?: error("$SEARCH_MIX_FEED_LIST_CLASS not found")
+        results.getDeclaredMethod("setRequestId", String::class.java).hookMethod {
+            before { param -> filterSearchResults(param.thisObject) }
+        }
+    }
+
+    optional("friendsFeed") { hookFriendsFeed() }
+
+    // Short-drama ads lock scrolling until they end; TikTok asks this service whether an item is
+    // such an ad. Its only (Aweme): Boolean method.
+    optional("dramaAdLock") {
+        val gates = DRAMA_BLOCKING_AD_SERVICE_CLASS.findClassOrNull(classLoader)?.declaredMethods
+            ?.filter {
+                it.returnType == Boolean::class.javaPrimitiveType &&
+                        it.parameterTypes.singleOrNull()?.name == AWEME_CLASS
+            }
+            .orEmpty()
+        check(gates.size == 1) { "expected one (Aweme): Boolean method, found ${gates.size}" }
+        gates.single().hookMethod {
+            after { param -> if (AwemeAdFilter.hideAds && param.result == true) param.result = false }
+        }
+    }
+
+    // endregion
+
     Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
 
 val RemoveFeedAds = patch(
     name = "Remove feed ads",
-    description = "Removes sponsored videos from the For You, Following and profile feeds, " +
-            "including ads inserted after the feed was loaded and the cold-start cache.",
+    description = "Removes sponsored videos from the For You, Following, Friends and profile " +
+            "feeds, mid-roll and profile pager ads, search result ads and the scroll lock of " +
+            "short-drama ads, including ads inserted after the feed was loaded and the cold-start cache.",
 ) {
     AwemeAdFilter.hideAds = true
+    dependsOn(TikTokFeedFilterHooks)
+}
+
+val HidePaidPartnerships = patch(
+    name = "Hide paid partnerships",
+    description = "Also hides creator posts labelled \"Paid partnership\" (branded content), " +
+            "\"Creator earns commission\" and location affiliate posts. Your own posts are kept.",
+) {
+    AwemeAdFilter.hidePaidPartnerships = true
     dependsOn(TikTokFeedFilterHooks)
 }
 
@@ -156,6 +226,69 @@ val HidePromotedMusicVideos = patch(
 private fun filterFeedItemList(feedItemList: Any?, source: String) {
     if (feedItemList == null || !AwemeAdFilter.enabled) return
     logRemoved(source, AwemeAdFilter.filterListField(feedItemList, "items"))
+    if (AwemeAdFilter.hideAds) clearPreloadAds(feedItemList)
+}
+
+/**
+ * FeedItemList.preloadAds: TopView ads TikTok preloads for the next start. The feed fetch hands
+ * them to the splash service before fetchFeedList returns (Skip splash ads stops that task); the
+ * later readers (the list's clone, the commerce preload) get an empty list from here on.
+ */
+private fun clearPreloadAds(feedItemList: Any) {
+    val ads = feedItemList.getObjectFieldOrNull("preloadAds") as? List<*>
+    if (ads.isNullOrEmpty()) return
+    runCatching { feedItemList.setObjectField("preloadAds", ArrayList<Any?>(0)) }
+        .onSuccess { logRemoved("topViewPreload", ads.size) }
+}
+
+/**
+ * Search results page: SearchMixFeedList.mItems holds SearchMixFeed cards (not Awemes). The list
+ * is replaced, never edited in place, and left alone if every card would go: a whole page of ads
+ * is far less likely than a changed card shape.
+ */
+private fun filterSearchResults(results: Any?) {
+    if (results == null || !AwemeAdFilter.hideAds) return
+    val cards = results.getObjectFieldOrNull("mItems") as? List<*>
+    if (cards.isNullOrEmpty()) return
+    val kept = try {
+        cards.filterNot(AwemeAdFilter::isSearchAdCard)
+    } catch (_: ConcurrentModificationException) {
+        return
+    }
+    if (kept.size == cards.size || kept.isEmpty()) return
+    runCatching { results.setObjectField("mItems", ArrayList(kept)) }
+        .onSuccess { logRemoved("searchAds", cards.size - kept.size) }
+}
+
+/**
+ * The Friends tab is a feed of its own: FriendsFeedResponse.friendFeedData holds FriendsFeed
+ * wrappers (`aweme` field; LIVE cards carry a room instead and are kept). Gson fills the field
+ * after construction and every consumer reads it directly, so it is filtered where a populated
+ * response is delivered (onSuccess), read (getAwemeList) or built by TikTok itself (constructor).
+ * The field is replaced, never edited in place, so an adapter holding the old list is unaffected.
+ */
+private fun PatchExecutor.hookFriendsFeed() {
+    val response = FRIENDS_FEED_RESPONSE_CLASS.findClassOrNull(classLoader)
+        ?: error("$FRIENDS_FEED_RESPONSE_CLASS not found")
+
+    fun filter(owner: Any?, source: String) {
+        if (owner == null || !AwemeAdFilter.enabled || !response.isInstance(owner)) return
+        val list = owner.getObjectFieldOrNull("friendFeedData") as? List<*> ?: return
+        val kept = AwemeAdFilter.filteredCopyOrNull(list, AwemeAdFilter::awemeOf) ?: return
+        runCatching { owner.setObjectField("friendFeedData", kept) }
+            .onSuccess { logRemoved(source, list.size - kept.size) }
+    }
+
+    response.getDeclaredMethod("getAwemeList").hookMethod {
+        before { param -> filter(param.thisObject, "friendsFeed") }
+    }
+    response.declaredConstructors.forEach { constructor ->
+        constructor.hookMethod { after { param -> filter(param.thisObject, "friendsFeed") } }
+    }
+    runCatching { ::friendsFeedSuccessFingerprints.dexMethodList.realMatches() }.getOrNull()
+        ?.forEach {
+            it.hookMethod { before { param -> param.args.forEach { arg -> filter(arg, "friendsFeedDelivery") } } }
+        }
 }
 
 /**

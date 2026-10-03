@@ -6,6 +6,7 @@ import io.github.nexalloy.findFieldOrNull
 import io.github.nexalloy.getObjectFieldOrNull
 import io.github.nexalloy.isNotStatic
 import io.github.nexalloy.setObjectField
+import org.json.JSONObject
 import java.lang.ref.WeakReference
 import java.lang.reflect.Field
 import java.util.concurrent.ConcurrentHashMap
@@ -32,7 +33,11 @@ internal object AwemeAdFilter {
     @Volatile
     var hideShopCards = false
 
-    val enabled get() = hideAds || hidePromotedMusic || hideShopCards
+    /** Paid partnerships and affiliate disclosures: see [isPaidPartnership]. */
+    @Volatile
+    var hidePaidPartnerships = false
+
+    val enabled get() = hideAds || hidePromotedMusic || hideShopCards || hidePaidPartnerships
 
     /**
      * `cardInsertInfo.cardType` values of TikTok Shop cards. Starts with the native EC card; the
@@ -49,12 +54,150 @@ internal object AwemeAdFilter {
 
     fun isFiltered(item: Any?): Boolean {
         if (item == null || !::awemeClass.isInitialized || !awemeClass.isInstance(item)) return false
-        if (hideAds && (item.callMethodOrNull("isAd") == true || item.callMethodOrNull("isSoftAd") == true)) {
-            return true
-        }
-        if (hideShopCards && isShopCard(item)) return true
-        return hidePromotedMusic && item.callMethodOrNull("isWithPromotionalMusic") == true
+        val matched = (hideAds && isAd(item)) ||
+                (hideShopCards && isShopCard(item)) ||
+                (hidePaidPartnerships && isPaidPartnership(item)) ||
+                (hidePromotedMusic && item.callMethodOrNull("isWithPromotionalMusic") == true)
+        // The signed-in account's own posts are never a feed preference (own profile grid,
+        // own promoted or branded posts). Only looked up once an item would go.
+        return matched && !SignedInUser.owns(item)
     }
+
+    /** Ads only, whatever the other switches say: the search grid and ad-only routes. */
+    fun isAdItem(item: Any?): Boolean {
+        if (!hideAds || item == null || !::awemeClass.isInitialized || !awemeClass.isInstance(item)) return false
+        return isAd(item) && !SignedInUser.owns(item)
+    }
+
+    /**
+     * `isAd()` and `isSoftAd()` also require `awemeRawAd`; an Aweme that carries the raw ad
+     * payload without either flag (boosted / Spark posts) is an ad as well.
+     */
+    private fun isAd(item: Any): Boolean =
+        item.callMethodOrNull("isAd") == true ||
+                item.callMethodOrNull("isSoftAd") == true ||
+                item.callMethodOrNull("getAwemeRawAd") != null
+
+    /**
+     * Creator-paid promotion that is not a TikTok ad slot, all read from Gson models:
+     *  - "Paid partnership" / branded content: `brandContentAccounts`, and the non-default
+     *    flags of `AwemeCommerceStruct` (the struct itself exists on ordinary posts);
+     *  - "Creator earns commission": `anchorsExtras.panel_top_disclosure_label` with a text;
+     *  - location affiliate label: `contentModel.standardBusinessModel.localAllianceInfo
+     *    .showBottomLabel()`, the check TikTok itself makes before drawing it.
+     * `commercialVideoInfo` is deliberately not used: it also describes branded effects that
+     * ordinary users post with.
+     */
+    private fun isPaidPartnership(item: Any): Boolean {
+        val accounts = item.callMethodOrNull("getBrandContentAccounts") as? Collection<*>
+        if (!accounts.isNullOrEmpty()) return true
+
+        item.callMethodOrNull("getCommerceVideoAuthInfo")?.let { commerce ->
+            if (commerce.callMethodOrNull("isBrandedContent") == true ||
+                commerce.callMethodOrNull("isBrandOrganicContent") == true ||
+                commerce.nonZero("getBrandedContentType") ||
+                commerce.nonZero("getBrandOrganicType") ||
+                (commerce.callMethodOrNull("getEcSearchBoBcLabelText") as? String).isNullOrBlank().not()
+            ) return true
+        }
+
+        return hasCommissionDisclosure(item) || hasLocalAllianceLabel(item)
+    }
+
+    private fun Any.nonZero(getter: String) = (callMethodOrNull(getter) as? Number)?.toLong()?.let { it != 0L } == true
+
+    private const val COMMISSION_DISCLOSURE = "panel_top_disclosure_label"
+
+    private fun hasCommissionDisclosure(item: Any): Boolean {
+        val extras = (item.callMethodOrNull("getAnchorsExtras") as? String)?.trim()
+        if (extras.isNullOrEmpty() || !extras.contains("\"$COMMISSION_DISCLOSURE\"")) return false
+        return runCatching {
+            val label = JSONObject(extras).optJSONObject(COMMISSION_DISCLOSURE) ?: return false
+            label.optString("display_text").isNotBlank() || label.optString("truncatable_text").isNotBlank()
+        }.getOrDefault(false)
+    }
+
+    private fun hasLocalAllianceLabel(item: Any): Boolean {
+        val business = item.callMethodOrNull("getContentModel")
+            ?.getObjectFieldOrNull("standardBusinessModel") ?: return false
+        val alliance = business.callMethodOrNull("getLocalAllianceInfo") ?: return false
+        return alliance.callMethodOrNull("showBottomLabel") == true
+    }
+
+    // region search grid
+
+    /** Ad shapes of a search result card (SearchMixFeed and its base class). */
+    private val SEARCH_AD_FIELDS = listOf("aiAdCard", "brandZoneCard", "preciseAd", "multiAdCard")
+
+    /**
+     * A search result card that is an ad by TikTok's own verdict (`isAdOrContainAd()`: the
+     * card carries ad creative ids), by one of its ad shapes, or because the video it wraps is.
+     */
+    fun isSearchAdCard(card: Any?): Boolean {
+        if (!hideAds || card == null) return false
+        if (card.callMethodOrNull("isAdOrContainAd") == true) return true
+        if (SEARCH_AD_FIELDS.any { card.getObjectFieldOrNull(it) != null }) return true
+        return isAdItem(card.getObjectFieldOrNull("aweme"))
+    }
+
+    // endregion
+
+    // region own posts
+
+    /**
+     * The signed-in account, read through TikTok's ServiceManager and IAccountUserService by
+     * their kept names. Cached for a few seconds: the account can change.
+     */
+    private object SignedInUser {
+        private const val TTL_MS = 10_000L
+
+        @Volatile private var uid: String? = null
+        @Volatile private var readAt = 0L
+        @Volatile private var unavailable = false
+        private var serviceManager: Any? = null
+        private var getService: java.lang.reflect.Method? = null
+        private var accountClass: Class<*>? = null
+
+        fun owns(item: Any): Boolean {
+            val self = currentUid() ?: return false
+            val author = item.callMethodOrNull("getAuthor") ?: return false
+            return self == author.callMethodOrNull("getUid")
+        }
+
+        private fun currentUid(): String? {
+            val now = System.currentTimeMillis()
+            if (now - readAt < TTL_MS) return uid
+            uid = read()
+            readAt = now
+            return uid
+        }
+
+        private fun read(): String? {
+            if (unavailable) return null
+            return try {
+                if (accountClass == null) {
+                    val loader = awemeClass.classLoader
+                    val manager = Class.forName("com.ss.android.ugc.aweme.framework.services.ServiceManager", false, loader)
+                    accountClass = Class.forName("com.ss.android.ugc.aweme.IAccountUserService", false, loader)
+                    getService = manager.getMethod("getService", Class::class.java)
+                    serviceManager = manager.getMethod("get").invoke(null)
+                }
+                val service = getService!!.invoke(serviceManager, accountClass) ?: return null
+                if (service.callMethodOrNull("isLogin") != true) return null
+                (service.callMethodOrNull("getCurUserId") as? String)?.takeIf { it.isNotEmpty() && it != "0" }
+            } catch (_: ClassNotFoundException) {
+                unavailable = true
+                null
+            } catch (_: NoSuchMethodException) {
+                unavailable = true
+                null
+            } catch (_: Throwable) {
+                null // service not ready yet; asked again after the TTL
+            }
+        }
+    }
+
+    // endregion
 
     /**
      * A card the card-insert platform put into the feed (an Aweme carrying `cardInsertInfo`)
