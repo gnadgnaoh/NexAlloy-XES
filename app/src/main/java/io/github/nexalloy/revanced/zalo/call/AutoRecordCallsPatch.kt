@@ -102,6 +102,8 @@ private object CallRecorder {
         recoverPending()
     }
 
+    // --- Peer metadata: partner UID + call direction ---------------------------
+
     private fun hookPeerMetadata(peerClass: Class<*>): Int {
         var count = 0
         count += hookAllByName(peerClass, PARTNER_ID_METHOD) {
@@ -137,6 +139,8 @@ private object CallRecorder {
         return count
     }
 
+    // --- Audio stream registration -> confirmed + connected -> start -----------
+
     private fun hookAudioStreamRegistration(peerClass: Class<*>): Int {
         var count = 0
         for (methodName in arrayOf(
@@ -162,6 +166,8 @@ private object CallRecorder {
         return count
     }
 
+    // --- Peer termination -> stop ----------------------------------------------
+
     private fun hookPeerTermination(peerClass: Class<*>): Int {
         var count = 0
         for (methodName in arrayOf(
@@ -177,6 +183,8 @@ private object CallRecorder {
         }
         return count
     }
+
+    // --- Callback registration binds a callback object to a peer handle --------
 
     private fun hookCallbackRegistration(peerClass: Class<*>): Int =
         hookAllByName(peerClass, REGISTER_CALLBACK) {
@@ -198,6 +206,7 @@ private object CallRecorder {
         loadOrNull(CallRecordingSymbols.CALL_CALLBACK, classLoader)
             ?.let { hookCallbackClass(it) } ?: 0
 
+    /** The registered CallCallback subclass found by DexKit; it overrides every callback. */
     private fun hookCallbackImpl(callbackImpl: Class<*>?): Int =
         callbackImpl?.let { hookCallbackClass(it) } ?: 0
 
@@ -230,6 +239,8 @@ private object CallRecorder {
         before { param ->
             val methodName = method.name
             var session = SESSIONS[param.thisObject]
+            // Zalo can reuse its callback after replacing the native peer. A new call
+            // must resolve the current handle instead of reviving the retired session.
             if (session == null || CallRecordingLifecycle.beginsCall(methodName)) {
                 resolveCurrentSession(param.thisObject)?.let { session = it }
             }
@@ -242,6 +253,8 @@ private object CallRecorder {
             val state = firstInt(param.args)
             if (CallRecordingLifecycle.isVideoState(methodName)) return@before
             if (CallRecordingLifecycle.shouldStopAudio(methodName, state)) {
+                // ZRTC ignores recordAudio(false, ...) after its controller leaves the
+                // confirmed state. Stop inside this before-hook.
                 stop(s, methodName)
                 return@before
             }
@@ -251,6 +264,7 @@ private object CallRecorder {
                 if (CallRecordingLifecycle.connectsAudio(methodName, state)) {
                     s.audioConnected = true
                 }
+                // The connected call state both confirms the call and means audio is up.
                 if (CallRecordingLifecycle.connectsCall(methodName, state)) {
                     s.confirmed = true
                     s.audioConnected = true
@@ -263,6 +277,13 @@ private object CallRecorder {
         }
     }
 
+    // --- In-call activity: terminal fallback only ------------------------------
+
+    /**
+     * When the call UI is destroyed, stop every session that is still recording. This
+     * uses only the stable activity name and the framework `onDestroy`; the connected
+     * edge comes from `onCallAudioState(32)` and the audio-stream registrations.
+     */
     private fun hookActivities(classLoader: ClassLoader): Int {
         var count = 0
         for (className in CallRecordingSymbols.CALL_ACTIVITIES) {
@@ -278,6 +299,8 @@ private object CallRecorder {
         return count
     }
 
+    // --- Notification observer feeds caller identity ---------------------------
+
     private fun hookNotifications(): Int {
         val nmClass = loadOrNull("android.app.NotificationManager", CallRecorder::class.java.classLoader)
             ?: return 0
@@ -291,6 +314,8 @@ private object CallRecorder {
         }
         return count
     }
+
+    // --- Native start / stop ---------------------------------------------------
 
     private fun start(session: Session, trigger: String) {
         synchronized(session) {
@@ -348,6 +373,7 @@ private object CallRecorder {
             startedAt = session.startedAt
             direction = session.direction
             CallRecordingMetadataStore.clear()
+            // A ZRTC peer handle can survive across calls. Clear per-call state.
             session.confirmed = false
             session.audioConnected = false
             session.tempFile = null
@@ -376,6 +402,13 @@ private object CallRecorder {
         appContext?.let { CallRecordingOutput.recoverPending(it, null) }
     }
 
+    // --- Peer-manager re-bind (DexKit-resolved) ---------------------------------
+
+    /**
+     * Binds [callback] to the peer the ZRTC manager currently holds. Zalo can reuse one
+     * callback across calls after replacing the native peer, so a new call must read the
+     * live handle instead of reviving the retired session.
+     */
     private fun resolveCurrentSession(callback: Any?): Session? {
         callback ?: return null
         val resolved = symbols ?: return null
@@ -394,6 +427,8 @@ private object CallRecorder {
             null
         }
     }
+
+    // --- helpers ---------------------------------------------------------------
 
     private fun isPeerActive(session: Session): Boolean {
         if (session.deleted) return false
@@ -440,6 +475,10 @@ private object CallRecorder {
     }
 }
 
+/**
+ * Tiny before/after DSL wrapper so the ported code reads like the original
+ * `XpHooks.Before` / `XpHooks.After` and hooks every overload of a method name.
+ */
 private class HookScope {
     var before: ((de.robv.android.xposed.XC_MethodHook.MethodHookParam) -> Unit)? = null
     var after: ((de.robv.android.xposed.XC_MethodHook.MethodHookParam) -> Unit)? = null
@@ -455,6 +494,7 @@ private fun hookMember(member: java.lang.reflect.Member, block: HookScope.() -> 
     }
 }
 
+/** Hooks every method overload named [name] on [clazz]; returns how many were hooked. */
 private fun hookAllByName(clazz: Class<*>, name: String, block: HookScope.() -> Unit): Int {
     var count = 0
     var current: Class<*>? = clazz
