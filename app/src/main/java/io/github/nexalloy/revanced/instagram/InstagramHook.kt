@@ -46,7 +46,7 @@ val InstagramPatches = arrayOf(
     ScreenshotPermission,
     // GhostChannelMarkAsRead,
     // GhostDMMarkAsRead,
-    SaveDeletedMessages
+    SaveDeletedMessages,
     ReelDownload,
     PostDownload,
     StoryDownload,
