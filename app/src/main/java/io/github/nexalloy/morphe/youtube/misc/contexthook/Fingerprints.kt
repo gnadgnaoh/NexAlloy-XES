@@ -106,8 +106,9 @@ val messageLiteBuilderMethodLegacy = findMethodDirect {
 @get:RequireAppVersion("21.33.000")
 val messageLiteBuilderMethod = findMethodDirect {
     val messageLiteBuilderClassName = messageLiteBuilderField().declaredClassName
-    AuthenticationChangeListenerFingerprint()
-        .invokes.single { it.returnTypeName == messageLiteBuilderClassName }
+    AuthenticationChangeListenerFingerprint.matchAll().mapNotNull {
+        it.method.invokes.singleOrNull { it.returnTypeName == messageLiteBuilderClassName }
+    }.single()
 }
 
 val osNameField = findFieldDirect {
