@@ -11,7 +11,7 @@ val soundBoostPatch = patch(
 ) {
     DexMethod("Landroid/media/AudioTrack;->getAudioSessionId()I").hookMethod {
         after {
-            SoundBoostPatch.onAudioSessionId(it.args[0] as Int)
+            SoundBoostPatch.onAudioSessionId(it.result as Int)
         }
     }
 }
