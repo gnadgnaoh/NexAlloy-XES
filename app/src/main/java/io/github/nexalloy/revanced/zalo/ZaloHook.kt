@@ -20,6 +20,7 @@ import io.github.nexalloy.revanced.zalo.media.PreferOriginalPhotoQuality
 import io.github.nexalloy.revanced.zalo.privacy.BlockSeenStatus
 import io.github.nexalloy.revanced.zalo.privacy.BlockTypingStatus
 import io.github.nexalloy.revanced.zalo.recall.ViewRecalledMessages
+import io.github.nexalloy.revanced.zalo.story.ViewStoriesAnonymously
 import io.github.nexalloy.revanced.zalo.telemetry.DisableAdvertisingId
 import io.github.nexalloy.revanced.zalo.telemetry.DisableAnalyticsDatabase
 import io.github.nexalloy.revanced.zalo.telemetry.DisableCrashlytics
@@ -51,4 +52,5 @@ val ZaloPatches = arrayOf<Patch>(
     KeepExpiredMediaAccessible,
     EnableDrivePhotoBackup,
     ViewRecalledMessages,
+    ViewStoriesAnonymously,
 )
