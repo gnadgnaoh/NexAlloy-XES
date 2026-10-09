@@ -5,6 +5,7 @@ import io.github.nexalloy.morphe.Fingerprint
 import io.github.nexalloy.morphe.InstructionLocation.MatchAfterWithin
 import io.github.nexalloy.morphe.Opcode
 import io.github.nexalloy.morphe.OpcodesFilter
+import io.github.nexalloy.morphe.StringComparisonType
 import io.github.nexalloy.morphe.fieldAccess
 import io.github.nexalloy.morphe.findClassDirect
 import io.github.nexalloy.morphe.findFieldDirect
@@ -46,13 +47,15 @@ val setPlaybackSpeedMethodReference = findMethodDirect {
 
 val PlayerControllerClass = findClassDirect { setPlaybackSpeedMethodReference().declaredClass!! }
 
-val playerControllerSetTimeReferenceFingerprint = fingerprint {
-    opcodes(Opcode.INVOKE_DIRECT_RANGE, Opcode.IGET_OBJECT)
-    strings("Media progress reported outside media playback: ")
-}
+internal object PlayerControllerSetTimeReferenceFingerprint : Fingerprint(
+    filters = OpcodesFilter.opcodesToFilters(
+        Opcode.INVOKE_DIRECT_RANGE,
+        Opcode.IGET_OBJECT
+    ) + string("Media progress reported outside media playback: ", comparison = StringComparisonType.CONTAINS)
+)
 
 val timeMethod = findMethodDirect {
-    playerControllerSetTimeReferenceFingerprint().invokes.single { it.name == "<init>" }
+    PlayerControllerSetTimeReferenceFingerprint().invokes.single { it.name == "<init>" }
 }
 
 internal object PlayerInitFingerprint : Fingerprint(

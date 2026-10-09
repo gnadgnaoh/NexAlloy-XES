@@ -51,11 +51,6 @@ val HideAds = patch(
         SwitchPreference("morphe_hide_self_sponsor_ads"),
         SwitchPreference("morphe_hide_shopping_links"),
         SwitchPreference("morphe_hide_video_ads"),
-        NonInteractivePreference(
-            key = "morphe_ads_channel_whitelist",
-            tag = ChannelWhitelistPreference::class.java,
-            selectable = true
-        ),
         SwitchPreference("morphe_hide_youtube_premium_promotions"),
     )
 

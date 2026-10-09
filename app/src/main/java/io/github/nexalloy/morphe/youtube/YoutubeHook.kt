@@ -5,6 +5,7 @@ import app.morphe.extension.shared.Utils
 import io.github.libxposed.api.XposedInterface
 import io.github.nexalloy.ExtensionResourceHook
 import io.github.nexalloy.addModuleAssets
+import io.github.nexalloy.atLast
 import io.github.nexalloy.injectHostClassLoaderToSelf
 import io.github.nexalloy.injectSelfClassLoaderToHost
 import io.github.nexalloy.morphe.shared.misc.CheckRecycleBitmapMediaSession
@@ -16,11 +17,12 @@ import io.github.nexalloy.morphe.youtube.interaction.swipecontrols.SwipeControls
 import io.github.nexalloy.morphe.youtube.layout.buttons.action.HideVideoActionButtons
 import io.github.nexalloy.morphe.youtube.layout.buttons.navigation.NavigationBar
 import io.github.nexalloy.morphe.youtube.layout.captions.AutoCaptions
+import io.github.nexalloy.morphe.youtube.layout.dearrow.deArrowPatch
 import io.github.nexalloy.morphe.youtube.layout.hide.general.HideLayoutComponents
 import io.github.nexalloy.morphe.youtube.layout.hide.shorts.HideShortsComponents
 import io.github.nexalloy.morphe.youtube.layout.shortsnoresume.DisableShortsResumingOnStartup
 import io.github.nexalloy.morphe.youtube.layout.sponsorblock.SponsorBlock
-import io.github.nexalloy.morphe.youtube.layout.thumbnails.AlternativeThumbnailsPatch
+import io.github.nexalloy.morphe.youtube.layout.startpage.changeStartPagePatch
 import io.github.nexalloy.morphe.youtube.layout.thumbnails.BypassImageRegionRestrictionsPatch
 import io.github.nexalloy.morphe.youtube.misc.backgroundplayback.BackgroundPlayback
 import io.github.nexalloy.morphe.youtube.misc.debugging.EnableDebugging
@@ -32,8 +34,6 @@ import io.github.nexalloy.morphe.youtube.video.codecs.DisableVideoCodecs
 import io.github.nexalloy.morphe.youtube.video.quality.VideoQuality
 import io.github.nexalloy.morphe.youtube.video.speed.PlaybackSpeed
 import io.github.nexalloy.patch
-import io.github.nexalloy.atLast
-import io.github.nexalloy.morphe.youtube.layout.startpage.changeStartPagePatch
 import org.luckypray.dexkit.wrap.DexMethod
 
 val ExtensionHook = patch(name = "<ExtensionHook>") {
@@ -92,7 +92,7 @@ val YouTubePatches = arrayOf(
     EnableDebugging,
     ForceOriginalAudio,
     DisableVideoCodecs,
-    AlternativeThumbnailsPatch,
+    deArrowPatch,
     BypassImageRegionRestrictionsPatch,
     CheckRecycleBitmapMediaSession,
     changeStartPagePatch,

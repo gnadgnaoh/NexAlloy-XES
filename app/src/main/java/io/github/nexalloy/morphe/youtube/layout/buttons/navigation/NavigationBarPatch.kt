@@ -107,5 +107,8 @@ val NavigationBar = patch(
         }
     }
 
+    // TODO Navigation search and settings button
+    // TODO useTranslucentNavigation
+    // TODO Disable the A/B layout with Subscriptions as a tab of Home.
     // TODO upper navigation toolbar
 }

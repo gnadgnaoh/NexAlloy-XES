@@ -3,7 +3,7 @@
     <PreferenceCategory android:title="@string/morphe_settings_title">
         <Preference
             android:icon="@drawable/morphe_settings_icon_dynamic"
-            android:title="@string/morphe_settings">
+            android:title="@string/morphe_settings_submenu_title">
             <intent
                 android:data="morphe_settings_intent"
                 android:targetClass="com.google.android.libraries.social.licenses.LicenseActivity"

@@ -21,23 +21,42 @@ internal object UserWasInShortsEvaluateAnchorFingerprint: Fingerprint(
 )
 
 /**
- * 21.03+
+ * 21.30+
  */
-@RequireAppVersion("21.03.00")
+@RequireAppVersion("21.30.000")
 internal object UserWasInShortsEvaluateFingerprint : Fingerprint(
-    classFingerprint = UserWasInShortsEvaluateAnchorFingerprint,
     filters = listOf(
         methodCall(
             opcode = Opcode.INVOKE_DIRECT_RANGE,
             name = "<init>",
             parameters = listOf("L", "Z", "Z", "L", "Z")
         ),
-//        methodCall( // 21.30+
-//            opcode = Opcode.INVOKE_DIRECT_RANGE,
-//            name = "<init>",
-//            parameters = listOf("L", "L", "L", "L", "L", "L",  "Ljava/lang/String;"),
-//            location = InstructionLocation.MatchAfterWithin(50)
-//        )
+        methodCall(
+            opcode = Opcode.INVOKE_DIRECT_RANGE,
+            name = "<init>",
+            parameters = listOf("L", "L", "L", "L", "L", "L",  "Ljava/lang/String;"),
+            location = InstructionLocation.MatchAfterWithin(50)
+        )
+    )
+)
+
+/**
+ * 21.03 - 21.29
+ */
+@RequireAppVersion(minVersion="21.03.00", maxVersion = "21.30.000")
+internal object UserWasInShortsEvaluateLegacyFingerprint : Fingerprint(
+    filters = listOf(
+        methodCall(
+            opcode = Opcode.INVOKE_DIRECT_RANGE,
+            name = "<init>",
+            parameters = listOf("L", "Z", "Z", "L", "Z")
+        ),
+        methodCall(
+            opcode = Opcode.INVOKE_DIRECT_RANGE,
+            name = "<init>",
+            parameters = listOf("L", "L", "L", "L", "L", "I"),
+            location = InstructionLocation.MatchAfterWithin(50)
+        )
     )
 )
 

@@ -36,9 +36,14 @@ internal object AuthenticationChangeListenerFingerprint : Fingerprint(
         )
     ),
     accessFlags = listOf(AccessFlags.PRIVATE, AccessFlags.FINAL),
+    parameters = listOf("L"),
     returnType = "V",
     filters = listOf(
-        methodCall(opcode = Opcode.INVOKE_VIRTUAL, parameters = emptyList(), returnType = "L")
+        methodCall(
+            opcode = Opcode.INVOKE_VIRTUAL,
+            returnType = "L",
+            parameters = emptyList()
+        )
     )
 )
 

@@ -154,11 +154,6 @@ class FingerprintDsl(init: FingerprintDsl.() -> Unit) {
         methodMatcherBlocks += { literal(literalSupplier) }
     }
 
-    @JvmName("classFingerprint2")
-    fun classFingerprint(findClassFunc: FindClassFunc) {
-        classFinder = findClassFunc
-    }
-
     fun classFingerprint(findMethodFunc: FindMethodFunc) {
         classFinder = { findMethodFunc().declaredClass!! }
     }
@@ -190,7 +185,7 @@ class FingerprintDsl(init: FingerprintDsl.() -> Unit) {
 
         // Apply classFinder or classMatcher
         if (classFinder != null) {
-            fp.classFinder = classFinder
+            fp.legacyClassFinder = classFinder
         }
         if (classMatcherBlock != null) {
             fp.classMatcherBlock = classMatcherBlock
@@ -213,7 +208,7 @@ class FingerprintDsl(init: FingerprintDsl.() -> Unit) {
 annotation class StrictQuery
 
 open class Fingerprint internal constructor(
-    classFingerprint: Fingerprint? = null,
+    val classFingerprint: Fingerprint? = null,
     definingClass: String? = null,
     name: String? = null,
     accessFlags: List<AccessFlags>? = null,
@@ -223,14 +218,11 @@ open class Fingerprint internal constructor(
     strings: List<String>? = null,
     custom: (MethodMatcher.() -> Unit)? = null
 ) {
-    internal var classFinder: FindClassFunc? = null
+    internal var legacyClassFinder: FindClassFunc? = null
     internal var classMatcherBlock: (ClassMatcher.() -> Unit)? = null
     internal var extraMethodMatcherBlocks: List<MethodMatcher.() -> Unit>? = null
 
     init {
-        if (classFingerprint != null) {
-            classFinder = { classFingerprint.run().declaredClass!! }
-        }
         if (custom != null)
             extraMethodMatcherBlocks = listOf(custom)
     }
@@ -392,8 +384,15 @@ open class Fingerprint internal constructor(
             }.findMethod {
                 matcher(methodMatcher)
             }
-        } else if (classFinder != null) {
-            classFinder!!.invoke(dexkit).findMethod {
+        } else if (classFingerprint != null) {
+            val classes = classFingerprint.queryAll().map { it.declaredClass!! }
+
+            dexkit.findMethod {
+                searchInClass(classes)
+                matcher(methodMatcher)
+            }
+        } else if (legacyClassFinder != null) {
+            legacyClassFinder!!.invoke(dexkit).findMethod {
                 matcher(methodMatcher)
             }
         } else {

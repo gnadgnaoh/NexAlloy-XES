@@ -42,12 +42,7 @@ val RememberPlaybackSpeed = patch {
             ),
             SwitchPreference("morphe_remember_playback_speed_last_selected", summary = true),
             SwitchPreference("morphe_remember_playback_speed_last_selected_toast", summary = true),
-            SwitchPreference("morphe_disable_playback_speed_music", summary = true),
-            NonInteractivePreference(
-                key = "morphe_playback_speed_channel_whitelist",
-                tag = ChannelWhitelistPreference::class.java,
-                selectable = true
-            )
+            SwitchPreference("morphe_disable_playback_speed_music", summary = true)
         )
     )
 

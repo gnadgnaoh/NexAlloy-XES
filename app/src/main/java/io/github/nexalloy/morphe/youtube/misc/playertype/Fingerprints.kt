@@ -15,11 +15,11 @@ import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.result.FieldUsingType
 
 object PlayerTypeFingerprint : Fingerprint(
+    definingClass = "Lcom/google/android/apps/youtube/app/common/player/overlay/YouTubePlayerOverlaysLayout;",
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
     returnType = "V",
     custom = {
         addParamType { superClass { descriptor = "Ljava/lang/Enum;" } }
-        declaredClass { className(".YouTubePlayerOverlaysLayout", StringMatchType.EndsWith) }
     }
 )
 

@@ -11,18 +11,6 @@ import io.github.nexalloy.morphe.literal
 import io.github.nexalloy.morphe.methodCall
 import io.github.nexalloy.morphe.strings
 
-internal const val ANDROID_AUTOMOTIVE_STRING = "Android Automotive"
-
-val addCreateButtonViewFingerprint = fingerprint {
-    strings("Android Wear", ANDROID_AUTOMOTIVE_STRING)
-}
-
-// rvxp
-val AutoMotiveFeatureMethod = findMethodDirect {
-    addCreateButtonViewFingerprint().invokes.findMethod {
-        matcher { strings("android.hardware.type.automotive") }
-    }.single()
-}
 
 internal object CreatePivotBarFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.CONSTRUCTOR),

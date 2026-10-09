@@ -21,6 +21,6 @@ val BypassImageRegionRestrictionsPatch = patch(
     )
 
     // A priority hook is not needed, as the image urls of interest are not modified
-    // by AlternativeThumbnails or any other patch in this repo.
+    // by DeArrow or any other patch in this repo.
     addImageUrlHook(::overrideImageURL)
 }

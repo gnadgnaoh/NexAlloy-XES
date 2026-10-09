@@ -139,13 +139,13 @@ object PreferenceScreen : BasePreferenceScreen() {
         iconBold = "@drawable/morphe_settings_screen_01_ads_bold",
         layout = "@layout/preference_with_icon",
     )
-    val ALTERNATIVE_THUMBNAILS = Screen(
-        key = "morphe_settings_screen_02_alt_thumbnails",
+    val DEARROW = Screen(
+        key = "morphe_settings_screen_02_dearrow",
         summaryKey = null,
-        icon = "@drawable/morphe_settings_screen_02_alt_thumbnails",
-        iconBold = "@drawable/morphe_settings_screen_02_alt_thumbnails_bold",
+        icon = "@drawable/morphe_settings_screen_02_dearrow",
+        iconBold = "@drawable/morphe_settings_screen_02_dearrow_bold",
         layout = "@layout/preference_with_icon",
-        sorting = Sorting.UNSORTED,
+        sorting = Sorting.UNSORTED
     )
     val FEED = Screen(
         key = "morphe_settings_screen_03_feed",
