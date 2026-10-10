@@ -4,6 +4,7 @@ import app.morphe.extension.shared.Logger
 import io.github.nexalloy.patch
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import java.lang.reflect.Modifier
 import java.util.concurrent.ConcurrentHashMap
 
 internal var hideAdsEnabled = false
@@ -62,6 +63,37 @@ private fun promotedFieldOf(itemClass: Class<*>, promotedClass: Class<*>): Field
             ?.apply { isAccessible = true }
             ?: NO_FIELD
     } as? Field
+
+private class ModuleShape(val itemsField: Field, val childItemField: Field)
+
+private val NOT_MODULE = Any()
+private val moduleShapeCache = ConcurrentHashMap<Class<*>, Any>()
+
+private fun moduleShapeOf(item: Any, itemInterface: Class<*>): ModuleShape? {
+    val cls = item.javaClass
+    moduleShapeCache[cls]?.let { return it as? ModuleShape }
+
+    val listFields = cls.declaredFields.filter {
+        !Modifier.isStatic(it.modifiers) && List::class.java.isAssignableFrom(it.type)
+    }
+    var undetermined = false
+    for (field in listFields) {
+        field.isAccessible = true
+        val first = (field.get(item) as? List<*>)?.firstOrNull { it != null }
+        if (first == null) {
+            // Empty list: cannot tell yet whether this class is a module.
+            undetermined = true
+            continue
+        }
+        val childField = first.javaClass.declaredFields.firstOrNull {
+            !Modifier.isStatic(it.modifiers) && it.type == itemInterface
+        } ?: continue
+        childField.isAccessible = true
+        return ModuleShape(field, childField).also { moduleShapeCache[cls] = it }
+    }
+    if (!undetermined) moduleShapeCache[cls] = NOT_MODULE
+    return null
+}
 
 private inline fun <T> resolving(what: String, block: () -> T): T =
     try {
@@ -129,10 +161,38 @@ val TimelineEntryHook = patch(name = "<TimelineEntryHook>") {
         return isEntryIdRemove(entryIdGetter.invoke(item) as? String)
     }
 
+    fun filterModuleChildren(item: Any): Boolean {
+        val shape = moduleShapeOf(item, itemInterface) ?: return false
+        val children = shape.itemsField.get(item) as? List<*> ?: return false
+        if (children.isEmpty()) return false
+
+        var changed = false
+        val kept = ArrayList<Any?>(children.size)
+        for (wrapper in children) {
+            val child = wrapper?.let { shape.childItemField.get(it) }
+            if (child != null && (shouldRemove(child) || filterModuleChildren(child))) {
+                changed = true
+                continue
+            }
+            kept.add(wrapper)
+        }
+        if (!changed) return false
+        if (kept.isEmpty()) return true
+
+        shape.itemsField.set(item, kept)
+        return false
+    }
+
     ::dbTimelineEntryToItemFingerprint.hookMethod {
         after { param ->
             val item = param.result ?: return@after
-            if (shouldRemove(item)) param.result = null
+            val remove = try {
+                shouldRemove(item) || filterModuleChildren(item)
+            } catch (e: Throwable) {
+                Logger.printException({ "[Twitter] TimelineEntryHook: filtering failed" }, e)
+                false
+            }
+            if (remove) param.result = null
         }
     }
 }
