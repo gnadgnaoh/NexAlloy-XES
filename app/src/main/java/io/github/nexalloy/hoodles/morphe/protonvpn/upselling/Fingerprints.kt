@@ -26,10 +26,13 @@ internal val settingRowWithIconFingerprint = findMethodDirect {
     findMethod {
         matcher {
             returnType = "void"
-            usingStrings(listOf("$SETTINGS_UI.SettingRowWithIcon ("), StringMatchType.StartsWith)
+            paramCount = 12
+            usingStrings(listOf("title"), StringMatchType.Equals)
         }
-    }.filter { it.paramCount >= 5 && it.paramTypeNames[4] == "java.lang.Integer" }
-        .only("SettingRowWithIcon") { it.descriptor }
+    }.filter { m ->
+        m.paramTypeNames[1] == "int" && m.paramTypeNames[2] == "java.lang.String" &&
+            m.paramTypeNames[4] == "java.lang.Integer" && m.paramTypeNames.subList(5, 8).all { it == "boolean" }
+    }.only("SettingRowWithIcon") { it.descriptor }
 }
 
 internal val settingsValueItemFingerprint = findMethodDirect {
@@ -37,65 +40,23 @@ internal val settingsValueItemFingerprint = findMethodDirect {
         matcher {
             returnType = "void"
             paramCount = 6
-            usingStrings(listOf("$SETTINGS_UI.SettingsValueItem ("), StringMatchType.StartsWith)
+            usingStrings(listOf("state", "onNavigateTo", "onRestricted"), StringMatchType.Equals)
         }
     }.only("SettingsValueItem") { it.descriptor }
 }
 
-internal val settingViewStateIsRestricted = findMethodDirect {
-    val state = settingsValueItemFingerprint(this).paramTypeNames.first()
+internal val activeNotificationsCoroutineFingerprint = findMethodDirect {
     findMethod {
         matcher {
-            declaredClass(state)
-            returnType = "boolean"
-            paramCount = 0
-        }
-    }.filter { !Modifier.isStatic(it.modifiers) }.only("SettingViewState.isRestricted") { it.descriptor }
-}
-
-internal val activeNotificationsFingerprint = findMethodDirect {
-    findMethod {
-        matcher {
-            returnType = "java.util.List"
-            paramTypes("long", "java.util.List")
+            name = "invokeSuspend"
             addInvoke("$API_NOTIFICATION->getStartTime()J")
             addInvoke("$API_NOTIFICATION->getEndTime()J")
         }
-    }.only("active notifications filter") { it.descriptor }
+    }.only("active notifications coroutine") { it.descriptor }
 }
 
 internal val serverGroupBannerClass = findClassDirect {
     dataClass("Banner(type=")
-}
-
-internal val freeConnectionsSetupViewsFingerprint = findMethodDirect {
-    findMethod {
-        matcher {
-            returnType = "void"
-            paramCount(3..4)
-            usingStrings(listOf("getRoot(...)", "inflate(...)"), StringMatchType.Equals)
-            addInvoke("Landroid/view/LayoutInflater;->from(Landroid/content/Context;)Landroid/view/LayoutInflater;")
-        }
-    }.filter { m ->
-        m.paramTypeNames[1] == "android.content.Context" && m.paramTypeNames.last() == "java.util.List" &&
-            m.invokes.any { it.returnTypeName == CONSTRAINT_LAYOUT }
-    }
-        .only("FreeConnectionsInfoBinding.setupViews") { it.descriptor }
-}
-
-internal val freeConnectionsUpsellBannerRoot = findMethodDirect {
-    freeConnectionsSetupViewsFingerprint(this).invokes
-        .filter { it.returnTypeName == CONSTRAINT_LAYOUT && it.paramCount == 0 }
-        .distinctBy { it.descriptor }
-        .only("upsell banner getRoot()") { it.descriptor }
-}
-
-internal val freeConnectionsUpsellBannerField = findFieldDirect {
-    val bindingClass = freeConnectionsSetupViewsFingerprint(this).paramTypeNames.first()
-    val bannerBinding = freeConnectionsUpsellBannerRoot(this).className
-    findClass { matcher { className(bindingClass) } }.single().fields
-        .filter { it.typeName == bannerBinding }
-        .only("upsellBanner field") { it.descriptor }
 }
 
 internal val vpnUserIsFreeUserFingerprint = findMethodDirect {
@@ -157,20 +118,6 @@ internal val accountSettingsViewStateConstructor = findMethodDirect {
     dataClass("AccountSettingsViewState(userId=").primaryConstructor().also {
         if (it.paramTypeNames.getOrNull(5) != "boolean") throw Exception("Unexpected constructor ${it.descriptor}")
     }
-}
-
-private const val UPGRADE_ONBOARDING_ACTIVITY = "com.protonvpn.android.ui.planupgrade.UpgradeOnboardingDialogActivity"
-private const val CONST_CLASS = 0x1c
-
-val upgradeOnboardingStartFingerprints = findMethodListDirect {
-    findMethod {
-        matcher {
-            paramTypes("android.content.Context")
-            addInvoke("Landroid/content/Context;->startActivity(Landroid/content/Intent;)V")
-        }
-    }.filter { m ->
-        m.instructions.any { it.opcode == CONST_CLASS && it.classRef?.name == UPGRADE_ONBOARDING_ACTIVITY }
-    }.also { if (it.isEmpty()) throw Exception("No UpgradeOnboardingDialogActivity launcher found") }
 }
 
 private fun <T> List<T>.only(what: String, describe: (T) -> String): T =

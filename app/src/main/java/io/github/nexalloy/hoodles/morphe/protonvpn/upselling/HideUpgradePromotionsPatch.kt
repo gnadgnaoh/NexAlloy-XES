@@ -5,6 +5,7 @@ import app.morphe.extension.shared.Logger
 import io.github.nexalloy.hoodles.morphe.protonvpn.freeservers.serverGroupsMainScreenStateConstructor
 import io.github.nexalloy.morphe.ResourceType
 import io.github.nexalloy.morphe.getResourceId
+import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
 
 private const val TYPE_ONE_TIME_POPUP = 1
@@ -33,12 +34,23 @@ val HideUpgradePromotions = patch(
         Logger.printInfo { "Proton VPN: $what not hidden: $e" }
     }
 
-    ::activeNotificationsFingerprint.hookMethod {
-        after { param ->
-            val notifications = param.result as? List<*> ?: return@after
-            param.result = notifications.filterNot { notification ->
-                val type = notification?.javaClass?.getMethod("getType")?.invoke(notification) as? Int
-                type in PROMO_NOTIFICATION_TYPES
+    fun isPromo(notification: Any?): Boolean {
+        val type = notification?.javaClass?.getMethod("getType")?.invoke(notification) as? Int
+        return type in PROMO_NOTIFICATION_TYPES
+    }
+
+    val apiNotification = classLoader.loadClass("com.protonvpn.android.promooffers.data.ApiNotification")
+    val coroutine = ::activeNotificationsCoroutineFingerprint.method
+    val listFields = coroutine.declaringClass.declaredFields
+        .filter { !java.lang.reflect.Modifier.isStatic(it.modifiers) && !it.type.isPrimitive }
+        .onEach { it.isAccessible = true }
+    coroutine.hookMethod {
+        before { param ->
+            val self = param.thisObject ?: return@before
+            for (field in listFields) {
+                val value = field.get(self) as? List<*> ?: continue
+                if (!apiNotification.isInstance(value.firstOrNull { it != null })) continue
+                if (value.any(::isPromo)) field.set(self, value.filterNot(::isPromo))
             }
         }
     }
@@ -53,11 +65,13 @@ val HideUpgradePromotions = patch(
     }
 
     optional("restricted setting items") {
-        val isRestricted = ::settingViewStateIsRestricted.method
+        val stateClass = ::settingsValueItemFingerprint.method.parameterTypes.first()
+        val restrictedField = stateClass.declaredFields.single { it.type == Boolean::class.javaPrimitiveType }
+            .apply { isAccessible = true }
         ::settingsValueItemFingerprint.hookMethod {
             before { param ->
                 val state = param.args[0] ?: return@before
-                if (isRestricted.invoke(state) == true) param.result = null
+                if (restrictedField.getBoolean(state)) param.result = null
             }
         }
     }
@@ -70,17 +84,6 @@ val HideUpgradePromotions = patch(
                 if (items.any { bannerClass.isInstance(it) }) {
                     param.args[1] = items.filterNot { bannerClass.isInstance(it) }
                 }
-            }
-        }
-    }
-
-    optional("free connections upsell banner") {
-        val upsellBannerField = ::freeConnectionsUpsellBannerField.field.apply { isAccessible = true }
-        val upsellBannerRoot = ::freeConnectionsUpsellBannerRoot.method.apply { isAccessible = true }
-        ::freeConnectionsSetupViewsFingerprint.hookMethod {
-            after { param ->
-                val banner = upsellBannerField.get(param.args[0]) ?: return@after
-                (upsellBannerRoot.invoke(banner) as? View)?.visibility = View.GONE
             }
         }
     }

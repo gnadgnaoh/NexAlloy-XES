@@ -16,14 +16,6 @@ internal val SkipUpgradeOnboarding = patch {
         hooked++
     }.onFailure { e -> Logger.printInfo { "Proton VPN: launchOnboarding not found: $e" } }
 
-    ::upgradeOnboardingStartFingerprints.dexMethodList.forEach { dexMethod ->
-        runCatching {
-            val method = dexMethod.toMethod()
-            method.hookMethod(XC_MethodReplacement.returnConstant(method.emptyResult()))
-            hooked++
-        }.onFailure { e -> Logger.printInfo { "Proton VPN: $dexMethod not hooked: $e" } }
-    }
-
     if (hooked == 0) error("Upgrade onboarding launcher not found")
 }
 
