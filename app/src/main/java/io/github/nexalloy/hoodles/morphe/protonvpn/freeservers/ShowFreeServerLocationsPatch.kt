@@ -3,7 +3,8 @@ package io.github.nexalloy.hoodles.morphe.protonvpn.freeservers
 import app.morphe.extension.shared.Logger
 import io.github.nexalloy.enumValueOf
 import io.github.nexalloy.hoodles.morphe.protonvpn.premium.SERVER
-import io.github.nexalloy.hoodles.morphe.protonvpn.premium.serverListFilterFingerprint
+import io.github.nexalloy.hoodles.morphe.protonvpn.premium.serverListFilterIncludeFreeField
+import io.github.nexalloy.hoodles.morphe.protonvpn.premium.serverListFilterLambdaFingerprint
 import io.github.nexalloy.patch
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.morphe.ResourceType
@@ -78,20 +79,23 @@ val ShowFreeServerLocations = patch(
 
 internal val FreeServersOnlyServerList = patch {
     val isFreeServer: Method = classLoader.loadClass(SERVER).getMethod("isFreeServer")
-    val filter = ::serverListFilterFingerprint.method
-    val includeFreeArg = 0
-    if (filter.parameterTypes[includeFreeArg] != Boolean::class.javaPrimitiveType) error("Unexpected server list filter: $filter")
-    val serverArg = filter.parameterTypes.indexOfLast { it.name == SERVER }
-    if (serverArg < 0) error("Server list filter has no Server parameter: $filter")
+    val filter = ::serverListFilterLambdaFingerprint.method
+    val includeFree = ::serverListFilterIncludeFreeField.field.apply { isAccessible = true }
+    val restoreKey = "protonvpn.restoreIncludeFree"
     filter.hookMethod {
         before { param ->
-            if (param.args[includeFreeArg] == true) return@before
-            val server = param.args[serverArg] ?: return@before
+            val self = param.thisObject ?: return@before
+            if (includeFree.getBoolean(self)) return@before
+            val server = param.args[0] ?: return@before
             if (isFreeServer.invoke(server) == true) {
-                param.args[includeFreeArg] = true
+                includeFree.setBoolean(self, true)
+                param.setObjectExtra(restoreKey, true)
             } else {
                 param.result = false
             }
+        }
+        after { param ->
+            if (param.getObjectExtra(restoreKey) == true) includeFree.setBoolean(param.thisObject, false)
         }
     }
 }

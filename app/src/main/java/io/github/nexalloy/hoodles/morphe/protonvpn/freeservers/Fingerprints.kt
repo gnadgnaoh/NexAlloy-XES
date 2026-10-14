@@ -110,5 +110,3 @@ private fun <T> firstOf(what: String, vararg strategies: () -> T): T {
     }
     throw Exception("$what: all ${strategies.size} strategies failed: ${errors.joinToString(" | ")}")
 }
-
-// endregion
