@@ -162,10 +162,12 @@ val ephemeralVanishLocalDeleteFingerprint = findMethodDirect {
     val seenEphemeralDataClass = findMethod {
         matcher {
             usingEqStrings("ig_thread_igid", "viewed_item_ranges", "viewed_timestamp_ms")
-            returnType = "void"
-            paramCount = 3
+            name = "unsafeParseFromJson"
+            paramCount = 1
         }
-    }.single().paramTypeNames[1]
+    }.filterNot { it.isStringPool() }.single().invokes.single {
+        it.isConstructor && !it.declaredClassName.startsWith("java.")
+    }.declaredClassName
 
     findMethod {
         matcher {
