@@ -22,6 +22,26 @@ private const val SESSION_ID = "me.proton.core.network.domain.session.SessionId"
 private const val BOOLEAN = "boolean"
 private const val OBJECT = "java.lang.Object"
 private const val LIST = "java.util.List"
+private const val ARRAY_LIST = "java.util.ArrayList"
+private const val INTEGER = "java.lang.Integer"
+private const val ITERABLE = "java.lang.Iterable"
+private const val SERIALIZABLE = "java.io.Serializable"
+
+// R8 in newer builds (5.20.7x) narrows some declared types (List -> ArrayList, Object -> Serializable, ...).
+private val LIST_TYPES = setOf(LIST, ARRAY_LIST)
+private val OBJECT_TYPES = setOf(OBJECT, SERIALIZABLE)
+
+private fun <T> firstOf(what: String, vararg strategies: () -> T): T {
+    val errors = mutableListOf<String>()
+    for (strategy in strategies) {
+        try {
+            return strategy()
+        } catch (e: Exception) {
+            errors += e.message ?: e.toString()
+        }
+    }
+    throw Exception("$what: all ${strategies.size} strategies failed: ${errors.joinToString(" | ")}")
+}
 
 private const val IS_FREE_SERVER = "L${"com/protonvpn/android/servers/Server"};->isFreeServer()Z"
 private const val GET_TIER = "L${"com/protonvpn/android/servers/Server"};->getTier()I"
@@ -76,25 +96,45 @@ internal val hasAccessToServerFingerprint = findMethodDirect {
     }.filter { it.isStatic() }.only("hasAccessToServer") { it.descriptor }
 }
 
-internal val haveAccessWithFingerprint = findMethodDirect {
+/**
+ * Newer builds inline [haveAccessWithFingerprint] into ServerGroup.hasAccessibleServer(Integer).
+ * The public method name and the abstract getServerList() survive R8 on both builds.
+ */
+internal val serverGroupHasAccessibleServerFingerprint = findMethodDirect {
     findMethod {
         matcher {
             returnType = BOOLEAN
-            paramTypes(SERVER, "java.lang.Integer")
-            addInvoke(GET_TIER)
+            paramTypes(INTEGER)
         }
-    }.filter { it.isStatic() }.only("haveAccessWith") { it.descriptor }
+    }.filter { m ->
+        !m.isStatic() && m.invokes.any { it.name == "getServerList" && it.className == m.className }
+    }.only("ServerGroup.hasAccessibleServer(Integer)") { it.descriptor }
 }
 
-internal val serverListFilterFingerprint = findMethodDirect {
+/**
+ * Newer builds turn the server list filter into a lambda: ctor(includeFree: Boolean, ServerFilterType, ...),
+ * invoke(Object server): Object.
+ */
+internal val serverListFilterLambdaFingerprint = findMethodDirect {
+    val filterEnum = io.github.nexalloy.hoodles.morphe.protonvpn.freeservers.serverFilterTypeEnum(this).name
     findMethod {
         matcher {
-            returnType = BOOLEAN
-            paramCount(2, 20)
+            paramCount = 1
             addInvoke(IS_FREE_SERVER)
         }
-    }.filter { it.paramTypeNames.first() == BOOLEAN && SERVER in it.paramTypeNames }
-        .only("server list filter") { it.descriptor }
+    }.filter { m ->
+        m.paramTypeNames == listOf(OBJECT) && m.returnTypeName == OBJECT && !m.isStatic() &&
+            m.declaredClass!!.methods.any { c ->
+                c.isConstructor && c.paramTypeNames.getOrNull(0) == BOOLEAN && c.paramTypeNames.getOrNull(1) == filterEnum
+            }
+    }.only("server list filter lambda") { it.descriptor }
+}
+
+/** The lambda field holding `includeFree` (first boolean field read by the lambda). */
+internal val serverListFilterIncludeFreeField = findFieldDirect {
+    val invoke = serverListFilterLambdaFingerprint(this)
+    invoke.instructions.firstOrNull { it.opcodeEnum == Opcode.IGET_BOOLEAN && it.fieldRef?.className == invoke.className }
+        ?.fieldRef ?: throw Exception("includeFree field not found in ${invoke.descriptor}")
 }
 
 internal val getBestScoreServerFingerprint = findMethodDirect {
@@ -104,7 +144,7 @@ internal val getBestScoreServerFingerprint = findMethodDirect {
             returnType = SERVER
             usingStrings(listOf("serverList", "smartProtocols"), StringMatchType.Equals)
         }
-    }.filter { it.paramTypeNames.firstOrNull() == "java.lang.Iterable" }
+    }.filter { it.paramTypeNames.firstOrNull() in setOf(ITERABLE, LIST) }
         .only("getBestScoreServer") { it.descriptor }
 }
 
@@ -130,31 +170,11 @@ internal val serverGroupConstructor = findMethodDirect {
         .maxByOrNull { it.paramCount } ?: throw Exception("ServerGroup constructor not found")
 }
 
-private fun DexKitBridge.netShieldAvailabilityEnum(): String =
-    findClass {
-        matcher {
-            superClass("java.lang.Enum")
-            usingStrings(listOf("AVAILABLE", "UPGRADE_VPN_PLUS"), StringMatchType.Equals)
-        }
-    }.only("NetShieldAvailability enum") { it.name }.name
-
-internal val getNetShieldAvailabilityFingerprint = findMethodDirect {
-    val vpnUser = vpnUserClass(this).name
-    findMethod {
-        matcher {
-            returnType = netShieldAvailabilityEnum()
-            paramTypes(vpnUser)
-        }
-    }.filter { it.isStatic() }.only("getNetShieldAvailability") { it.descriptor }
-}
-
 internal val getFilterButtonsFingerprint = findMethodDirect {
     findMethod {
-        matcher {
-            returnType = LIST
-            usingStrings(listOf("availableTypes", "selectedType", "emptyTypes"), StringMatchType.Equals)
-        }
-    }.only("getFilterButtons") { it.descriptor }
+        matcher { usingStrings(listOf("availableTypes", "selectedType"), StringMatchType.Equals) }
+    }.filter { it.returnTypeName in LIST_TYPES && it.paramCount == 5 }
+        .only("getFilterButtons") { it.descriptor }
 }
 
 internal val profileTypeEnum = findClassDirect {
@@ -202,16 +222,18 @@ private fun DexKitBridge.freeCountriesGetter(): MethodData =
     findMethod {
         matcher {
             declaredClass(SERVER_MANAGER)
-            returnType = LIST
             paramCount = 0
             addInvoke(IS_FREE_SERVER)
         }
-    }.filter { getter -> getter.invokes.any { it.className == SERVER_MANAGER && it.returnTypeName == LIST } }
+    }.filter { getter ->
+        getter.returnTypeName in LIST_TYPES &&
+            getter.invokes.any { it.className == SERVER_MANAGER && it.returnTypeName in LIST_TYPES }
+    }
         .only("ServerManager.freeCountries") { it.descriptor }
 
 private fun DexKitBridge.vpnCountriesGetter(): MethodData =
     freeCountriesGetter().invokes
-        .filter { it.className == SERVER_MANAGER && it.returnTypeName == LIST && it.paramCount == 0 }
+        .filter { it.className == SERVER_MANAGER && it.returnTypeName in LIST_TYPES && it.paramCount == 0 }
         .distinctBy { it.descriptor }
         .only("ServerManager.getVpnCountries") { it.descriptor }
 
@@ -220,11 +242,12 @@ private fun DexKitBridge.serverManager2Wrapper(getter: MethodData, what: String)
     return findMethod {
         matcher {
             declaredClass(owner)
-            returnType = OBJECT
             paramCount = 1
             addInvoke(getter.descriptor)
         }
-    }.filter { wrapper -> wrapper.invokes.none { it.name == "size" && it.className == LIST } }
+    }.filter { wrapper ->
+        wrapper.returnTypeName in OBJECT_TYPES && wrapper.invokes.none { it.name == "size" && it.className == LIST }
+    }
         .only(what) { it.descriptor }
 }
 
@@ -241,6 +264,8 @@ internal val profileCountriesFingerprint = findMethodDirect {
     val owner = getVpnCountries.className
     getVpnCountries.callers
         .filter { it.className != owner && !it.className.startsWith("$owner\$") }
+        // newer builds flatten inner lambdas of the owner into sibling classes of the same package
+        .filter { it.className.substringBeforeLast('.', "") != owner.substringBeforeLast('.', "") }
         .distinctBy { it.descriptor }
         .only("ProfilesServerDataAdapter.countries") { it.descriptor }
 }
@@ -251,10 +276,9 @@ internal val serverManager2GetRandomServerFingerprint = findMethodDirect {
     findMethod {
         matcher {
             declaredClass(owner)
-            returnType = OBJECT
             paramCount = 3
         }
-    }.filter { it.paramTypeNames.take(2) == listOf(vpnUser, PROTOCOL_SELECTION) }
+    }.filter { it.returnTypeName in OBJECT_TYPES && it.paramTypeNames.take(2) == listOf(vpnUser, PROTOCOL_SELECTION) }
         .only("ServerManager2.getRandomServer") { it.descriptor }
 }
 
@@ -295,20 +319,11 @@ internal val freeUserChangeServerStateField = findFieldDirect {
     val previousStore = insns.subList(0, storeIndex)
         .indexOfLast { it.opcodeEnum == Opcode.IPUT_OBJECT && it.fieldRef?.className == owner.name }
 
-    val lambdaClasses = insns.subList(previousStore + 1, storeIndex)
-        .filter { it.opcodeEnum == Opcode.NEW_INSTANCE }
-        .mapNotNull { it.classRef?.name }
-        .filter { it.startsWith("${owner.name}\$") }
-
-    val flowFields = owner.fields.filter { it.typeName == stateField.typeName && it.descriptor != stateField.descriptor }
-    val accessed = lambdaClasses.flatMap { lambda ->
-        findClass { matcher { className(lambda) } }.flatMap { it.methods }.flatMap { it.invokes }
-            .filter { it.className == owner.name && it.isStatic() }
-            .flatMap { accessor -> accessor.usingFields.map { it.field } }
-    }.filter { field -> flowFields.any { it.descriptor == field.descriptor } }
-        .distinctBy { it.descriptor }
-
-    accessed.only("freeUserChangeServerState field") { it.descriptor }
+    // The flow field assigned right before the collected one (VPN-state-gated change-server flow).
+    if (previousStore < 0) throw Exception("no field store before the state flow store")
+    insns[previousStore].fieldRef!!.also {
+        if (it.descriptor == stateField.descriptor) throw Exception("previous store is the state field itself")
+    }
 }
 
 private const val VPN_COUNTRY_GET_SERVER_LIST = "Lcom/protonvpn/android/models/vpn/VpnCountry;->getServerList()Ljava/util/List;"
@@ -321,18 +336,6 @@ val profileServerListReadersFingerprints = findMethodListDirect {
             addInvoke(VPN_COUNTRY_GET_SERVER_LIST)
         }
     }.ifEmpty { throw Exception("No ProfilesServerDataAdapter method reads VpnCountry.serverList") }
-}
-
-internal val profileServerFilterFingerprint = findMethodDirect {
-    val adapter = profileCountriesFingerprint(this).className
-    findMethod {
-        matcher {
-            declaredClass(adapter)
-            returnType = BOOLEAN
-            paramTypes(SERVER)
-            addInvoke(IS_FREE_SERVER)
-        }
-    }.only("profile server filter") { it.descriptor }
 }
 
 internal val vpnCountryGetServerListFingerprint = findMethodDirect {

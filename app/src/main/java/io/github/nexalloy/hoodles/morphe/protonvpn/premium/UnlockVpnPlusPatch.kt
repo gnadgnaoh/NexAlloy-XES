@@ -58,7 +58,16 @@ val UnlockVpnPlus = patch(
             }
         }
     }
-    ::haveAccessWithFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
+
+    val hasAccessibleServer = ::serverGroupHasAccessibleServerFingerprint.method
+    val groupServerList = hasAccessibleServer.declaringClass.getDeclaredMethod("getServerList")
+        .apply { isAccessible = true }
+    hasAccessibleServer.hookMethod {
+        before { param ->
+            val servers = groupServerList.invoke(param.thisObject) as? Collection<*>
+            param.result = !servers.isNullOrEmpty()
+        }
+    }
 
     ::serverGroupConstructor.constructor.let { ctor ->
         val availableArg = ctor.firstParamOf(Boolean::class.javaPrimitiveType!!, "available")
@@ -78,16 +87,12 @@ val UnlockVpnPlus = patch(
         }
     }
 
-
-    ::getNetShieldAvailabilityFingerprint.method.let { method ->
-        val available = method.returnType.enumValueOf("AVAILABLE")
-            ?: error("NetShieldAvailability.AVAILABLE not found")
-        method.hookMethod(XC_MethodReplacement.returnConstant(available))
+    ::getFilterButtonsFingerprint.method.let { method ->
+        val empty: Any =
+            if (method.returnType.isAssignableFrom(Collections.emptyList<Any>().javaClass)) Collections.emptyList<Any>()
+            else ArrayList<Any>()
+        method.hookMethod(XC_MethodReplacement.returnConstant(empty))
     }
-
-    ::getFilterButtonsFingerprint.hookMethod(
-        XC_MethodReplacement.returnConstant(Collections.emptyList<Any>())
-    )
 
     val standardProfileType = ::profileTypeEnum.clazz.enumValueOf("Standard")
         ?: error("ProfileType.Standard not found")
@@ -106,13 +111,9 @@ val UnlockVpnPlus = patch(
                     }
                 })
             }
-        ::profileServerFilterFingerprint.hookMethod {
-            before { param -> param.result = param.args[0]?.isFree() == true }
-        }
     }.onFailure { e ->
         Logger.printInfo { "Proton VPN: profile cities/servers not limited to free servers: $e" }
     }
-
     val getVpnCountries = ::serverManager2GetVpnCountriesFingerprint.method
     val getFreeCountries = ::serverManager2GetFreeCountriesFingerprint.method.apply { isAccessible = true }
     ::profileCountriesFingerprint.hookMethod(scopedHook(getVpnCountries) {
