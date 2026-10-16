@@ -11,6 +11,7 @@ import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_29_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_49_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_15_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_21_or_greater
+import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_23_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_36_or_greater
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.morphe.youtube.video.information.onCreateHook
@@ -54,7 +55,11 @@ val BackgroundPlayback = patch(
     }
 
     // Enable background playback option in YouTube settings
-    ::backgroundPlaybackSettingsSubFingerprint.hookMethod(returnConstant(true))
+    val backgroundPlaybackAllowedMatch = if (is_21_23_or_greater)
+        ::backgroundPlaybackSettingsSubFingerprint
+    else
+        ::backgroundPlaybackSettingsLegacySubFingerprint
+    backgroundPlaybackAllowedMatch.hookMethod(returnConstant(true))
 
     // Prevents playback from resuming if it was interrupted from the notification
     // and the app was subsequently brought to the foreground.

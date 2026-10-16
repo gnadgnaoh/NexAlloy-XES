@@ -18,6 +18,7 @@ import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_31_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_04_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_05_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_36_or_greater
+import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_41_or_greater
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.patch
 import org.luckypray.dexkit.wrap.DexMethod
@@ -54,7 +55,7 @@ internal fun disableNewPlayerControlsFeatureFlag() {
         insertLiteralOverride(45698813, LegacyPlayerControlsPatch::forcePlayerSeekbar)
     }
 
-    if (is_21_04_or_greater) {
+    if (is_21_04_or_greater && !is_21_41_or_greater) {
         insertLiteralOverride(45752335L)
     }
 }
