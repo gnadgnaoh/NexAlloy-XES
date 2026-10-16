@@ -6,19 +6,26 @@ import android.net.Uri
 import android.view.View
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import io.github.nexalloy.R
 import java.lang.reflect.Field
 import java.lang.reflect.Modifier
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Long-press the enlarged profile picture (view id `expanded_profile_pic`) to save it.
  * The image view holds one or more ImageUrl fields; the largest one wins.
+ *
+ * Only `IgImageView.onAttachedToWindow` is hooked (CircularImageView and the other image views
+ * extend it), not `View.onAttachedToWindow` for every view in the app. The check per call is a
+ * single int comparison.
  */
 internal object ProfilePicDownloadHook {
 
-    private const val HOOKED_TAG = "ie_profile_dl"
+    private const val IG_IMAGE_VIEW = "com.instagram.common.ui.widget.imageview.IgImageView"
 
     @Volatile
     private var viewId = 0
@@ -26,21 +33,35 @@ internal object ProfilePicDownloadHook {
     @Volatile
     private var viewIdResolved = false
 
-    fun install() {
-        XposedHelpers.findAndHookMethod(
-            View::class.java, "onAttachedToWindow",
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    if (!FeatureFlags.enableProfileDownload) return
-                    val v = param.thisObject as View
-                    val id = v.id
-                    if (id == View.NO_ID) return
-                    val wanted = if (viewIdResolved) viewId else resolveViewId(v)
-                    if (wanted == 0 || id != wanted || v.tag == HOOKED_TAG) return
-                    attach(v)
-                }
-            }
-        )
+    /** Views that already carry our listener; weak so recycled screens are released. */
+    private val attached: MutableSet<View> = Collections.newSetFromMap(WeakHashMap())
+
+    private val onAttached = object : XC_MethodHook() {
+        override fun afterHookedMethod(param: MethodHookParam) {
+            if (!FeatureFlags.enableProfileDownload) return
+            val v = param.thisObject as? View ?: return
+            val id = v.id
+            if (id == View.NO_ID) return
+            val wanted = if (viewIdResolved) viewId else resolveViewId(v)
+            if (wanted == 0 || id != wanted) return
+            synchronized(attached) { if (!attached.add(v)) return }
+            attach(v)
+        }
+    }
+
+    fun install(cl: ClassLoader) {
+        val imageView = runCatching { cl.loadClass(IG_IMAGE_VIEW) }.getOrNull()
+        val target = imageView?.let {
+            runCatching { it.getDeclaredMethod("onAttachedToWindow") }.getOrNull()
+        }
+        if (target != null) {
+            XposedBridge.hookMethod(target, onAttached)
+            ModuleLog.line("(NA|Profile) hooked IgImageView.onAttachedToWindow")
+        } else {
+            // Fallback for builds where IgImageView no longer overrides it.
+            XposedHelpers.findAndHookMethod(View::class.java, "onAttachedToWindow", onAttached)
+            ModuleLog.line("(NA|Profile) IgImageView hook unavailable; using View.onAttachedToWindow")
+        }
         FeatureStatusTracker.setHooked("ProfileDownload")
     }
 
@@ -57,7 +78,6 @@ internal object ProfilePicDownloadHook {
     }
 
     private fun attach(view: View) {
-        view.tag = HOOKED_TAG
         view.setOnLongClickListener { v ->
             val ctx = v.context
             val url = extractUrl(v)

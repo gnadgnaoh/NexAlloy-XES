@@ -23,6 +23,7 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import io.github.nexalloy.R
+import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import kotlin.math.max
@@ -80,10 +81,10 @@ internal class InstantUploadHook {
             val onActive: XC_MethodHook = object : XC_MethodHook() {
                 override fun afterHookedMethod(p: MethodHookParam) {
                     if (!FeatureFlags.uploadInstants) return
-                    val act = currentActivity()
-                    if (act != null) {
-                        MediaSaver.mainHandler.post { injectChip(act) }
-                    }
+                    if (!lifecycleRegistered) registerLifecycle(cl) // app may not exist at patch time
+                    val act = currentActivity() ?: return
+                    if (chip != null && chipHost === act) return // already shown, nothing to do
+                    MediaSaver.mainHandler.post { injectChip(act) }
                 }
             }
             var n = 0
@@ -112,6 +113,7 @@ internal class InstantUploadHook {
             app.registerActivityLifecycleCallbacks(
                 object : Application.ActivityLifecycleCallbacks {
                     override fun onActivityPaused(a: Activity) {
+                        if (resumed?.get() === a) resumed = null
                         if (a === chipHost) removeChip()
                     }
 
@@ -124,6 +126,7 @@ internal class InstantUploadHook {
                     }
 
                     override fun onActivityResumed(a: Activity) {
+                        resumed = WeakReference(a)
                         if (chip != null && a !== chipHost) removeChip()
                     }
 
@@ -351,8 +354,17 @@ internal class InstantUploadHook {
         private fun dp(a: Activity, v: Int): Int =
             (v * a.resources.displayMetrics.density).roundToInt()
 
+        /** Resumed activity, tracked by the lifecycle callbacks registered in [registerLifecycle]. */
+        @Volatile
+        private var resumed: WeakReference<Activity>? = null
+
+        /**
+         * The foreground activity. Normally read from the tracked reference; the ActivityThread
+         * reflection only runs until the first onResume after the patch is installed.
+         */
         @Suppress("UNCHECKED_CAST")
         internal fun currentActivity(): Activity? {
+            resumed?.get()?.let { return it }
             try {
                 val atClass = Class.forName("android.app.ActivityThread")
                 val at = atClass.getMethod("currentActivityThread").invoke(null)
@@ -366,7 +378,7 @@ internal class InstantUploadHook {
                     if (paused.get(record) == false) {
                         val af = rc.getDeclaredField("activity")
                         af.isAccessible = true
-                        return af.get(record) as Activity?
+                        return (af.get(record) as Activity?)?.also { resumed = WeakReference(it) }
                     }
                 }
             } catch (ignored: Throwable) {

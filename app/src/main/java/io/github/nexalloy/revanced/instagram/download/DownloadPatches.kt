@@ -120,7 +120,7 @@ val ProfilePictureDownload: Patch = patch(
 ) {
     dependsOn(MediaDownloadCore)
     FeatureFlags.enableProfileDownload = true
-    ProfilePicDownloadHook.install()
+    ProfilePicDownloadHook.install(classLoader)
 }
 
 val SaveInstants: Patch = patch(

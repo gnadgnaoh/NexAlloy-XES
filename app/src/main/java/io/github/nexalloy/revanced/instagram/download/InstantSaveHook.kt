@@ -56,9 +56,13 @@ internal object InstantSaveHook {
         ModuleLog.line("(NA|Instant) long-press constructors hooked: ${constructors.size}")
     }
 
-    private fun function1Fields(cls: Class<*>, function1: Class<*>): List<Field> =
+    private val fieldCache = java.util.concurrent.ConcurrentHashMap<Class<*>, List<Field>>()
+
+    /** Function1 fields of a gesture lambda class, resolved once per class. */
+    private fun function1Fields(cls: Class<*>, function1: Class<*>): List<Field> = fieldCache.getOrPut(cls) {
         cls.declaredFields.filter { !Modifier.isStatic(it.modifiers) && it.type == function1 }
             .onEach { it.isAccessible = true }
+    }
 
     private fun wrap(owner: Any, field: Field, function1: Class<*>, cl: ClassLoader) {
         try {
