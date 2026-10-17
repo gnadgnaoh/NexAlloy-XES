@@ -10,25 +10,13 @@ internal fun PatchExecutor.blockAdtimaEntryPoints(
     context: String,
     entryPoints: List<Pair<String, KProperty0<FindMethodFunc>>>,
 ) {
-    val blocked = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    entryPoints.forEach { (label, fingerprint) ->
-        runCatching {
-            fingerprint.hookMethod {
-                before { param -> param.result = null }
-            }
-        }.onSuccess { blocked += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName})" }
+    // Không bọc: một entry point không hook được thì cả patch lỗi → có toast + log.
+    entryPoints.forEach { (_, fingerprint) ->
+        fingerprint.hookMethod {
+            before { param -> param.result = null }
+        }
     }
-
-    if (skipped.isNotEmpty()) {
-        Logger.printInfo { "[Zalo] $context, not blocked: ${skipped.joinToString()}" }
-    }
-
-    check(blocked.isNotEmpty()) {
-        "$context: no entry point could be blocked (${skipped.joinToString()})"
-    }
+    Logger.printInfo { "[Zalo] $context, blocked: ${entryPoints.joinToString { it.first }}" }
 }
 
 val DisableAdtimaAdRequests = patch(

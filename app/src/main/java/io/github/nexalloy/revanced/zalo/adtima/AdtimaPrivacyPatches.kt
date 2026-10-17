@@ -19,7 +19,7 @@ val OptOutAdtimaAdTracking = patch(
         "Google advertising-ID lookup. Complements the Adtima request blocks.",
 ) {
     val isLat = ::adtimaLimitAdTrackingField.field.apply { isAccessible = true }
-    runCatching { isLat.setInt(null, 1) }
+    isLat.setInt(null, 1)
 
     ::adtimaLimitAdTrackingTaskFingerprint.hookMethod {
         before { param ->
