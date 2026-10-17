@@ -4,7 +4,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
-import app.morphe.extension.shared.Logger
 import de.robv.android.xposed.XC_MethodReplacement
 import io.github.nexalloy.findClassOrNull
 import io.github.nexalloy.hookMethod
@@ -22,18 +21,9 @@ val AllowScreenshots = patch(
         "work on protected screens too (paid LIVE, payment and verification pages, ...), and " +
         "lifts the Circle to Search block on the feed.",
 ) {
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
     val int = Int::class.javaPrimitiveType!!
 
-    optional("Window.addFlags") {
+    run { // Window.addFlags
         Window::class.java.getDeclaredMethod("addFlags", int).hookMethod {
             before { param ->
                 val flags = param.args[0] as Int
@@ -42,7 +32,7 @@ val AllowScreenshots = patch(
         }
     }
 
-    optional("Window.setFlags") {
+    run { // Window.setFlags
         Window::class.java.getDeclaredMethod("setFlags", int, int).hookMethod {
             before { param ->
                 param.args[0] = (param.args[0] as Int) and SECURE.inv()
@@ -51,13 +41,13 @@ val AllowScreenshots = patch(
         }
     }
 
-    optional("Window.setAttributes") {
+    run { // Window.setAttributes
         Window::class.java.getDeclaredMethod("setAttributes", WindowManager.LayoutParams::class.java).hookMethod {
             before { param -> (param.args[0] as? WindowManager.LayoutParams)?.clearSecure() }
         }
     }
 
-    optional("WindowManagerImpl") {
+    run { // WindowManagerImpl
         val impl = Class.forName("android.view.WindowManagerImpl")
         listOf("addView", "updateViewLayout").forEach { name ->
             impl.getDeclaredMethod(name, View::class.java, ViewGroup.LayoutParams::class.java).hookMethod {
@@ -66,14 +56,13 @@ val AllowScreenshots = patch(
         }
     }
 
-    check(installed.isNotEmpty()) { "FLAG_SECURE could not be hooked: ${skipped.joinToString("; ")}" }
 
-    optional("paidLiveCourseSetting") {
+    run { // paidLiveCourseSetting
         val setting = PAID_LIVE_COURSE_SETTING.findClassOrNull(classLoader) ?: error("$PAID_LIVE_COURSE_SETTING not found")
         setting.getDeclaredMethod("getValue").hookMethod(XC_MethodReplacement.returnConstant(false))
     }
 
-    optional("circleSearchBlock") {
+    run { // circleSearchBlock
         val getters = ::circleSearchBlockSettingFingerprints.dexMethodList.realMatches()
         check(getters.isNotEmpty()) { "circle_search_block setting not found" }
         getters.forEach { getter ->
@@ -85,7 +74,6 @@ val AllowScreenshots = patch(
         }
     }
 
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
 
 private fun WindowManager.LayoutParams.clearSecure() {

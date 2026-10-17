@@ -2,7 +2,6 @@ package io.github.nexalloy.morphe.tiktok.screencapture
 
 import android.app.Activity
 import android.content.Context
-import app.morphe.extension.shared.Logger
 import de.robv.android.xposed.XC_MethodReplacement
 import io.github.nexalloy.findClassOrNull
 import io.github.nexalloy.hookMethod
@@ -29,16 +28,7 @@ val DisableScreenCaptureDetection = patch(
     name = "Disable screen capture detection",
     description = "Prevents TikTok from reacting to screenshots and screen recordings.",
 ) {
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
-    optional("screenCaptureCallback") {
+    run { // screenCaptureCallback
         val methods = Activity::class.java.declaredMethods.filter {
             it.name == "registerScreenCaptureCallback" || it.name == "unregisterScreenCaptureCallback"
         }
@@ -50,16 +40,17 @@ val DisableScreenCaptureDetection = patch(
         }
     }
 
-    optional("clearModeDisplayListener") {
+    run { // clearModeDisplayListener
         val listeners = ::clearModeDisplayListenerFingerprints.dexMethodList.realMatches()
         check(listeners.isNotEmpty()) { "ClearModePanelComponent display listener not found" }
         listeners.forEach { it.toMethod().hookMethod(XC_MethodReplacement.DO_NOTHING) }
     }
 
-    optional("screenshotTasks") {
+    run { // screenshotTasks
         val hooked = SCREENSHOT_TASKS.count { name ->
             val task = name.findClassOrNull(classLoader) ?: return@count false
-            val run = runCatching { task.getDeclaredMethod("run", Context::class.java) }.getOrNull()
+            val run = task.declaredMethods
+                .firstOrNull { it.name == "run" && it.parameterTypes.contentEquals(arrayOf<Class<*>>(Context::class.java)) }
                 ?: return@count false
             run.hookMethod(XC_MethodReplacement.DO_NOTHING)
             true
@@ -67,7 +58,7 @@ val DisableScreenCaptureDetection = patch(
         check(hooked > 0) { "none of the ${SCREENSHOT_TASKS.size} screenshot tasks found" }
     }
 
-    optional("screenshotFeedback") {
+    run { // screenshotFeedback
         val service = SCREENSHOT_FEEDBACK_SERVICE.findClassOrNull(classLoader)
             ?: error("$SCREENSHOT_FEEDBACK_SERVICE not found")
         val methods = service.declaredMethods.filter {
@@ -77,6 +68,4 @@ val DisableScreenCaptureDetection = patch(
         methods.forEach { it.hookMethod(XC_MethodReplacement.returnConstant(false)) }
     }
 
-    check(installed.isNotEmpty()) { "no screen capture detection could be disabled: ${skipped.joinToString("; ")}" }
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
