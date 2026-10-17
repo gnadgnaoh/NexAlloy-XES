@@ -1,6 +1,5 @@
 package io.github.nexalloy.hoodles.morphe.protonvpn.freeservers
 
-import app.morphe.extension.shared.Logger
 import io.github.nexalloy.enumValueOf
 import io.github.nexalloy.hoodles.morphe.protonvpn.premium.SERVER
 import io.github.nexalloy.hoodles.morphe.protonvpn.premium.serverListFilterIncludeFreeField
@@ -55,16 +54,14 @@ val ShowFreeServerLocations = patch(
         ::citiesScreenSaveStateConstructor,
         ::serversScreenSaveStateConstructor,
     ).forEach { fingerprint ->
-        runCatching { fingerprint.constructor.forceFilterAll() }.onFailure { e ->
-            Logger.printInfo { "Proton VPN: ${fingerprint.name} not forced to All: $e" }
-        }
+        fingerprint.constructor.forceFilterAll()
     }
     ::serverGroupsMainScreenStateConstructor.constructor.let { ctor ->
         ctor.forceFilterAll()
         ctor.hookMethod { before { param -> param.args[2] = emptyList<Any>() } }
     }
 
-    runCatching {
+    run { // header "free locations"
         val allCountries = getResourceId(ResourceType.STRING, "country_filter_all_list_header")
         val plusCountries = getResourceId(ResourceType.STRING, "country_filter_all_list_header_free")
         val freeLocations = getResourceId(ResourceType.STRING, "free_connections_info_server_locations")
@@ -74,7 +71,7 @@ val ShowFreeServerLocations = patch(
                 if (label == allCountries || label == plusCountries) param.args[0] = freeLocations
             }
         }
-    }.onFailure { e -> Logger.printInfo { "Proton VPN: free locations header not set: $e" } }
+    }
 }
 
 internal val FreeServersOnlyServerList = patch {
