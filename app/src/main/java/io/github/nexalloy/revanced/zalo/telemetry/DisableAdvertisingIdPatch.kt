@@ -21,7 +21,11 @@ val DisableAdvertisingId = patch(
     client.getDeclaredMethod("getAdvertisingIdInfo", android.content.Context::class.java).hookMethod(zeroInfo)
     client.getDeclaredMethod("getInfo").hookMethod(zeroInfo)
 
-    runCatching {
-        client.getDeclaredMethod("getIsAdIdFakeForDebugLogging", android.content.Context::class.java)
-    }.getOrNull()?.hookMethod(XC_MethodReplacement.returnConstant(true))
+    // Method này chỉ có ở một số bản thư viện ads-identifier → dò, không có thì bỏ qua.
+    client.declaredMethods
+        .firstOrNull {
+            it.name == "getIsAdIdFakeForDebugLogging" &&
+                it.parameterTypes.contentEquals(arrayOf<Class<*>>(android.content.Context::class.java))
+        }
+        ?.hookMethod(XC_MethodReplacement.returnConstant(true))
 }

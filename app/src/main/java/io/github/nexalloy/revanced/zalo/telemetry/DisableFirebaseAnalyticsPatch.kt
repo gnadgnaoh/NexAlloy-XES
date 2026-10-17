@@ -21,9 +21,9 @@ val DisableFirebaseAnalytics = patch(
 ) {
     ::firebaseAnalyticsDeactivatedFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
 
-    val contextImpl = runCatching { Class.forName("android.app.ContextImpl") }.getOrNull()
-    listOfNotNull(contextImpl, ContextWrapper::class.java).forEach { owner ->
-        runCatching { owner.declaredMethods }.getOrDefault(emptyArray())
+    val contextImpl = Class.forName("android.app.ContextImpl")
+    listOf(contextImpl, ContextWrapper::class.java).forEach { owner ->
+        owner.declaredMethods
             .filter { it.name.contains("Service") && it.parameterTypes.any(Intent::class.java::isAssignableFrom) }
             .forEach { method ->
                 method.hookMethod {
