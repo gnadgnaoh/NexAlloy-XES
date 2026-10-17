@@ -1,7 +1,6 @@
 package io.github.nexalloy.morphe.tiktok.captcha
 
 import android.app.Activity
-import app.morphe.extension.shared.Logger
 import java.lang.reflect.Method
 import io.github.nexalloy.morphe.tiktok.shared.TikTokServices
 import io.github.nexalloy.hookMethod
@@ -23,29 +22,18 @@ val HideCaptchaPopups = patch(
 ) {
     TikTokServices.init(classLoader)
 
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
-    optional("closeCallbacks") {
+    run { // closeCallbacks
         CaptchaSuppressor.init(::secCaptchaCloseCallbacksFingerprint.dexMethodList.map { it.toMethod() })
         check(CaptchaSuppressor.canCloseSecCaptcha()) { "SecCaptcha close callbacks not found" }
     }
 
-    val listenerClass: Class<*>? = runCatching {
-        ::secCaptchaCloseCallbacksFingerprint.dexMethodList.first().toMethod().declaringClass
-    }.getOrNull()
+    val listenerClass: Class<*>? = ::secCaptchaCloseCallbacksFingerprint.dexMethodList.first().toMethod().declaringClass
     fun Method.listenerArg() = argIndex("listener") { type ->
         type != Any::class.java && listenerClass != null && type.isAssignableFrom(listenerClass)
     }
     fun Method.activityArg() = argIndex("activity") { Activity::class.java.isAssignableFrom(it) }
 
-    if (CaptchaSuppressor.canCloseSecCaptcha()) optional("popCaptchaV2") {
+    if (CaptchaSuppressor.canCloseSecCaptcha()) run { // popCaptchaV2
         val method = PopCaptchaV2Fingerprint.method
         val activity = method.activityArg()
         val riskInfo = method.argIndex("riskInfo") { it == String::class.java }
@@ -59,7 +47,7 @@ val HideCaptchaPopups = patch(
         }
     }
 
-    if (CaptchaSuppressor.canCloseSecCaptcha()) optional("popCaptcha") {
+    if (CaptchaSuppressor.canCloseSecCaptcha()) run { // popCaptcha
         val method = PopCaptchaFingerprint.method
         val activity = method.activityArg()
         val listener = method.listenerArg()
@@ -72,7 +60,7 @@ val HideCaptchaPopups = patch(
         }
     }
 
-    optional("oecVerification") {
+    run { // oecVerification
         val method = OecRiskControlExecuteFingerprint.method
         val callback = method.argIndex("callback") { it.name == BD_TURING_CALLBACK }
         val request = method.argIndex("request") { it.name != BD_TURING_CALLBACK }
@@ -85,6 +73,4 @@ val HideCaptchaPopups = patch(
         }
     }
 
-    check(installed.isNotEmpty()) { "no captcha entry point could be hooked: ${skipped.joinToString("; ")}" }
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
