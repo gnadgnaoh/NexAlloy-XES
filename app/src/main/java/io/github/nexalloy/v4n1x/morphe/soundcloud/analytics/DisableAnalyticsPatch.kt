@@ -8,5 +8,5 @@ val DisableAnalytics = patch(
     name = "Disable analytics",
     description = "Disables SoundCloud's analytics.",
 ) {
-    HandleMessageFingerprint.memberOrNull?.hookMethod(XC_MethodReplacement.DO_NOTHING)
+    HandleMessageFingerprint.member.hookMethod(XC_MethodReplacement.DO_NOTHING)
 }
