@@ -26,15 +26,6 @@ val GhostMode = patch(
         "the typing indicator and which videos of people you follow you watched (their view " +
         "history). Your online status is unchanged.",
 ) {
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
     val reporters = REPORTERS.flatMap { (api, names) ->
         val apiClass = api.findClassOrNull(classLoader)
         names.mapNotNull { name ->
@@ -46,13 +37,13 @@ val GhostMode = patch(
     }
     Logger.printDebug { "$TAG reporters=$reporters" }
 
-    optional("reportRequests") {
+    run { // reportRequests
         val paths = reporters.filterNot { it.suspend }.map { it.path }.toSet()
         check(paths.isNotEmpty()) { "no report path resolved" }
         ReportRequestBlocker.install(classLoader, paths)
     }
 
-    optional("suspendReports") {
+    run { // suspendReports
         val names = reporters.filter { it.suspend }.map { it.name }.toSet()
         check(names.isNotEmpty()) { "no suspend reporter on this build" }
         val methods = REPORTER_WRAPPERS.mapNotNull { it.findClassOrNull(classLoader) }
@@ -65,17 +56,17 @@ val GhostMode = patch(
         }
     }
 
-    optional("typingStatus") {
+    run { // typingStatus
         val sender = TYPING_STATUS_SENDER_CLASS.findClassOrNull(classLoader) ?: error("$TYPING_STATUS_SENDER_CLASS not found")
         val methods = sender.declaredMethods.filter {
             !Modifier.isStatic(it.modifiers) && it.returnType == Void.TYPE &&
-                it.parameterTypes.contentEquals(arrayOf(String::class.java))
+                it.parameterTypes.contentEquals(arrayOf<Class<*>>(String::class.java))
         }
         check(methods.isNotEmpty()) { "TypingStatusSenderTimer has no (String)V method" }
         methods.forEach { it.hookMethod(XC_MethodReplacement.DO_NOTHING) }
     }
 
-    optional("storyPlayStats") {
+    run { // storyPlayStats
         val aweme = AWEME_CLASS.findClassOrNull(classLoader) ?: error("$AWEME_CLASS not found")
         val senders = ::awemeStatsSenderFingerprints.dexMethodList.realMatches()
         check(senders.size == 1) { "expected one play report sender, found ${senders.size}" }
@@ -89,7 +80,7 @@ val GhostMode = patch(
 
     var statsDispatchHooked = false
 
-    optional("followedPlayStats") {
+    run { // followedPlayStats
         val aweme = AWEME_CLASS.findClassOrNull(classLoader) ?: error("$AWEME_CLASS not found")
         FollowedViews.init(aweme)
         val senders = ::awemeStatsSenderFingerprints.dexMethodList.realMatches()
@@ -102,7 +93,7 @@ val GhostMode = patch(
         }
     }
 
-    optional("followedStatsDispatch") {
+    run { // followedStatsDispatch
         val byName = AWEME_STATS_API_CLASS.findClassOrNull(classLoader)?.declaredMethods?.filter {
             Modifier.isStatic(it.modifiers) && it.returnType == Void.TYPE && it.parameterCount == 1 &&
                 !List::class.java.isAssignableFrom(it.parameterTypes[0]) &&
@@ -125,7 +116,7 @@ val GhostMode = patch(
         statsDispatchHooked = true
     }
 
-    optional("followedViewRequests") {
+    run { // followedViewRequests
         val service = AWEME_STATS_SERVICE_CLASS.findClassOrNull(classLoader)
         fun pathOf(method: String): String? {
             val declared = service?.declaredMethods?.firstOrNull { it.name == method }
@@ -137,8 +128,6 @@ val GhostMode = patch(
         FollowedViewRequestBlocker.install(classLoader, fastStats, stats)
     }
 
-    check(installed.isNotEmpty()) { "no ghost mode hook could be installed: ${skipped.joinToString("; ")}" }
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
 
 private data class Reporter(val name: String, val path: String, val suspend: Boolean)
@@ -230,7 +219,8 @@ internal object FollowedViews {
         getFollowStatus = getAuthor.returnType.getMethod("getFollowStatus").also {
             check(it.returnType == Int::class.javaPrimitiveType) { "getFollowStatus returns ${it.returnType.name}" }
         }
-        getForwardItem = runCatching { aweme.getMethod("getForwardItem") }.getOrNull()
+        // Không phải bản nào cũng có → dò, không có thì bỏ qua.
+        getForwardItem = aweme.methods.firstOrNull { it.name == "getForwardItem" && it.parameterCount == 0 }
             ?.takeIf { aweme.isAssignableFrom(it.returnType) }
     }
 
