@@ -1,6 +1,7 @@
 package io.github.nexalloy.revanced.facebook.ad
 
 import android.os.Bundle
+import io.github.nexalloy.findClassOrNull
 import io.github.nexalloy.patch
 import io.github.nexalloy.revanced.facebook.AdStoryInspector
 import io.github.nexalloy.revanced.facebook.AUDIENCE_NETWORK_ACTIVITY_CLASS
@@ -61,57 +62,33 @@ val HideFacebookAds = patch(
     name = "Hide Facebook ads",
     description = "Removes sponsored feed stories, Reels ads, game ads, and banner ads.",
 ) {
-    runCatching { ::sponsoredPoolAddMethodFingerprint.method }.getOrElse {
-        error("Facebook feed dex is not visible yet - deferring patch")
+    // Chưa thấy dex feed → ném lỗi → KatanaDexGate thử lại; lần cuối vẫn lỗi thì có toast.
+    ::sponsoredPoolAddMethodFingerprint.method
+
+    val storyInspector = AdStoryInspector(::adKindEnumFingerprint.clazz)
+    val listBuilderClass = ::listBuilderClassFingerprint.clazz
+
+    hookListBuilderAppend(resolveListBuilderAppendMethod(listBuilderClass), storyInspector)
+    resolveListBuilderFactoryMethod(listBuilderClass)?.let { factoryMethod ->
+        hookListResultFilter(factoryMethod, "list factory", storyInspector)
     }
 
-    val storyInspector = runCatching { AdStoryInspector(::adKindEnumFingerprint.clazz) }.getOrNull()
-
-    val listBuilderClass = runCatching { ::listBuilderClassFingerprint.clazz }.getOrNull()
-
-    if (storyInspector != null && listBuilderClass != null) {
-        runCatching {
-            hookListBuilderAppend(resolveListBuilderAppendMethod(listBuilderClass), storyInspector)
-        }
-
-        runCatching {
-            resolveListBuilderFactoryMethod(listBuilderClass)?.let { factoryMethod ->
-                hookListResultFilter(factoryMethod, "list factory", storyInspector)
-            }
-        }
+    ::pluginPackMethodsFingerprint.dexMethodList.forEach { dm ->
+        hookPluginPackFallback(dm.toMethod(), storyInspector)
     }
 
-    if (storyInspector != null) {
-        ::pluginPackMethodsFingerprint.dexMethodList.forEach { dm ->
-            runCatching { hookPluginPackFallback(dm.toMethod(), storyInspector) }
-        }
-    }
+    ::allPluginPackListMethodsFingerprint.dexMethodList.forEach { dm -> hookPluginPackList(dm.toMethod()) }
+    ::pluginDescriptorGateMethodsFingerprint.dexMethodList.forEach { dm -> hookPluginDescriptorGate(dm.toMethod()) }
+    ::directMonetizationAdsPluginListFingerprint.dexMethodList.forEach { dm -> hookAdPluginListBuilder(dm.toMethod()) }
 
-    runCatching { ::allPluginPackListMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookPluginPackList(dm.toMethod()) } }
+    resolveInstreamBannerEligibilityMethod(::instreamBannerEligibilityClassFingerprint.clazz)
+        ?.let { hookInstreamBannerEligibility(it) }
 
-    runCatching { ::pluginDescriptorGateMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookPluginDescriptorGate(dm.toMethod()) } }
+    hookIndicatorPillAdEligibility(::indicatorPillAdEligibilityFingerprint.method)
 
-    runCatching { ::directMonetizationAdsPluginListFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookAdPluginListBuilder(dm.toMethod()) } }
+    ::reelsBannerRenderMethodsFingerprint.dexMethodList.forEach { dm -> hookReelsBannerRender(dm.toMethod()) }
 
-    runCatching {
-        resolveInstreamBannerEligibilityMethod(::instreamBannerEligibilityClassFingerprint.clazz)
-            ?.let { hookInstreamBannerEligibility(it) }
-    }
-
-    runCatching { hookIndicatorPillAdEligibility(::indicatorPillAdEligibilityFingerprint.method) }
-
-    ::reelsBannerRenderMethodsFingerprint.dexMethodList.forEach { dm ->
-        runCatching { hookReelsBannerRender(dm.toMethod()) }
-    }
-
-    val storyPoolAddMethods = runCatching {
-        ::storyPoolAddMethodsFingerprint.dexMethodList.mapNotNull { dm ->
-            runCatching { dm.toMethod() }.getOrNull()
-        }
-    }.getOrNull().orEmpty()
+    val storyPoolAddMethods = ::storyPoolAddMethodsFingerprint.dexMethodList.map { it.toMethod() }
 
     val feedItemInspector = FeedItemInspector(
         storyPoolAddMethods
@@ -121,177 +98,123 @@ val HideFacebookAds = patch(
     )
 
     ::feedCsrFilterMethodsFingerprint.dexMethodList.forEach { dm ->
-        runCatching {
-            val method = dm.toMethod()
-            val listArgIndex = method.parameterTypes.indexOfFirst {
-                it.name == "com.google.common.collect.ImmutableList"
-            }.coerceAtLeast(0)
-            hookFeedCsrFilterInput(FeedCsrFilterHook(method, listArgIndex), feedItemInspector)
-        }
+        val method = dm.toMethod()
+        val listArgIndex = method.parameterTypes.indexOfFirst {
+            it.name == "com.google.common.collect.ImmutableList"
+        }.coerceAtLeast(0)
+        hookFeedCsrFilterInput(FeedCsrFilterHook(method, listArgIndex), feedItemInspector)
     }
 
-    runCatching {
-        hookFeedCollectionAddEdge(::feedCollectionAddEdgeMethodFingerprint.method, feedItemInspector)
-    }
+    hookFeedCollectionAddEdge(::feedCollectionAddEdgeMethodFingerprint.method, feedItemInspector)
 
     ::lateFeedListMethodsFingerprint.dexMethodList.forEach { dm ->
-        runCatching {
-            val method = dm.toMethod()
-            val listArgIndex = method.parameterTypes.indexOfFirst {
-                it.name == "com.google.common.collect.ImmutableList"
-            }.coerceAtLeast(0)
-            hookLateFeedListSanitizer(FeedListSanitizerHook(method, listArgIndex), feedItemInspector)
-        }
+        val method = dm.toMethod()
+        val listArgIndex = method.parameterTypes.indexOfFirst {
+            it.name == "com.google.common.collect.ImmutableList"
+        }.coerceAtLeast(0)
+        hookLateFeedListSanitizer(FeedListSanitizerHook(method, listArgIndex), feedItemInspector)
     }
 
-    storyPoolAddMethods.forEach { method ->
-        runCatching { hookStoryPoolAdd(method, feedItemInspector) }
-    }
+    storyPoolAddMethods.forEach { method -> hookStoryPoolAdd(method, feedItemInspector) }
 
-    runCatching { hookSponsoredPoolAdd(::sponsoredPoolAddMethodFingerprint.method) }
+    hookSponsoredPoolAdd(::sponsoredPoolAddMethodFingerprint.method)
+    hookSponsoredStoryNext(::sponsoredStoryNextMethodFingerprint.method)
+    hookSponsoredStoryListMethods(::sponsoredStoryManagerClassFingerprint.clazz)
 
-    runCatching { hookSponsoredStoryNext(::sponsoredStoryNextMethodFingerprint.method) }
+    val poolClass = ::sponsoredPoolClassFingerprint.clazz
+    hookSponsoredPoolListMethods(poolClass)
+    hookSponsoredPoolResultMethods(poolClass)
 
-    runCatching { hookSponsoredStoryListMethods(::sponsoredStoryManagerClassFingerprint.clazz) }
+    ::sponsoredStoryVendorMethodsFingerprint.dexMethodList.forEach { dm -> hookNullAdResult(dm.toMethod()) }
 
-    runCatching {
-        val poolClass = ::sponsoredPoolClassFingerprint.clazz
-        hookSponsoredPoolListMethods(poolClass)
-        hookSponsoredPoolResultMethods(poolClass)
-    }
-
-    runCatching { ::sponsoredStoryVendorMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookNullAdResult(dm.toMethod()) } }
-
-    val insertionTrigger = runCatching { ::storyAdsInsertionTriggerMethodFingerprint.method }.getOrNull()
-    val providerClasses = runCatching {
-        ::storyAdsInDiscMethodsFingerprint.dexMethodList.mapNotNull { dm ->
-            runCatching { classLoader.loadClass(dm.className) }.getOrNull()
-        }.distinct()
-    }.getOrNull().orEmpty().ifEmpty {
-        listOfNotNull(runCatching { ::storyAdsInDiscClassFingerprint.clazz }.getOrNull())
-    }
+    val insertionTrigger = ::storyAdsInsertionTriggerMethodFingerprint.method
+    // Dự phòng có chủ đích: không có method nào thì dùng class fingerprint (cái này mà thiếu thì ném lỗi).
+    val providerClasses = ::storyAdsInDiscMethodsFingerprint.dexMethodList
+        .map { classLoader.loadClass(it.className) }
+        .distinct()
+        .ifEmpty { listOf(::storyAdsInDiscClassFingerprint.clazz) }
     providerClasses.forEachIndexed { index, providerClass ->
-        runCatching {
-            hookStoryAdProvider(
-                resolveStoryAdProviderHooks(providerClass, index == 0, insertionTrigger)
-            )
-        }
+        hookStoryAdProvider(resolveStoryAdProviderHooks(providerClass, index == 0, insertionTrigger))
     }
 
-    val gameAdMethods = ::gameAdRequestMethodsFingerprint.dexMethodList.mapNotNull { dm ->
-        runCatching { dm.toMethod() }.getOrNull()
-    }
-
-    gameAdMethods.forEach { m ->
-        runCatching { hookGameAdRequest(m) }
-    }
+    val gameAdMethods = ::gameAdRequestMethodsFingerprint.dexMethodList.map { it.toMethod() }
+    gameAdMethods.forEach { m -> hookGameAdRequest(m) }
 
     gameAdMethods.firstOrNull()?.let { firstMethod ->
-        runCatching {
-            firstMethod.declaringClass.declaredMethods
-                .firstOrNull { m -> m.name == "postMessage" && m.parameterCount == 2 && m.parameterTypes.all { it == String::class.java } }
-                ?.apply { isAccessible = true }
-                ?.let { hookGameAdBridge(it) }
-        }
+        firstMethod.declaringClass.declaredMethods
+            .firstOrNull { m -> m.name == "postMessage" && m.parameterCount == 2 && m.parameterTypes.all { it == String::class.java } }
+            ?.apply { isAccessible = true }
+            ?.let { hookGameAdBridge(it) }
     }
 
     gameAdMethods.firstOrNull()?.declaringClass?.let { bridgeClass ->
-        runCatching { hookGameAdResultMethods(bridgeClass) }
-        runCatching { hookGameAdServiceDispatchMethods(bridgeClass) }
+        hookGameAdResultMethods(bridgeClass)
+        hookGameAdServiceDispatchMethods(bridgeClass)
     }
 
-    runCatching { hookGameAdJavascriptInterfaceWatcher() }
-    runCatching { hookGameAdScriptDeliveries() }
+    hookGameAdJavascriptInterfaceWatcher()
+    hookGameAdScriptDeliveries()
+    hookAudienceNetworkRewardFallbacks(classLoader)
+    hookInstantGamesAdsLoader(classLoader)
 
-    runCatching { hookAudienceNetworkRewardFallbacks(classLoader) }
+    ::quicksilverAdsVoltronGateFingerprint.dexMethodList.forEach { dm -> hookForceBoolean(dm.toMethod(), false) }
+    ::quicksilverBannerAdLoaderMethodsFingerprint.dexMethodList.forEach { dm -> hookAdRequestNoOp(dm.toMethod()) }
 
-    runCatching { hookInstantGamesAdsLoader(classLoader) }
+    // Class có thể không tồn tại ở một số bản → dò bằng findClassOrNull, không cần runCatching.
+    NEKO_PLAYABLE_ACTIVITY_CLASS.findClassOrNull(classLoader)?.declaredMethods
+        ?.firstOrNull { m -> m.name == "onResume" && m.parameterCount == 0 }
+        ?.apply { isAccessible = true }
+        ?.let { hookPlayableAdActivity(it) }
 
-    runCatching { ::quicksilverAdsVoltronGateFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookForceBoolean(dm.toMethod(), false) } }
-
-    runCatching { ::quicksilverBannerAdLoaderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookAdRequestNoOp(dm.toMethod()) } }
-
-    runCatching {
-        classLoader.loadClass(NEKO_PLAYABLE_ACTIVITY_CLASS).declaredMethods
-            .firstOrNull { m -> m.name == "onResume" && m.parameterCount == 0 }
-            ?.apply { isAccessible = true }
-            ?.let { hookPlayableAdActivity(it) }
-    }
+    fun Class<*>.lifecycleMethod() = (declaredMethods + methods).firstOrNull { m ->
+        (m.name == "onResume" && m.parameterCount == 0) ||
+            (m.name == "onStart" && m.parameterCount == 0) ||
+            (m.name == "onCreate" && m.parameterCount == 1 && m.parameterTypes[0] == Bundle::class.java)
+    }?.apply { isAccessible = true }
 
     val gameAdUiHooked = LinkedHashMap<String, Method>()
     listOf(AUDIENCE_NETWORK_ACTIVITY_CLASS, AUDIENCE_NETWORK_REMOTE_ACTIVITY_CLASS).forEach { cn ->
-        runCatching {
-            val actClass = classLoader.loadClass(cn)
-            (actClass.declaredMethods + actClass.methods).firstOrNull { m ->
-                (m.name == "onResume" && m.parameterCount == 0) ||
-                (m.name == "onStart" && m.parameterCount == 0) ||
-                (m.name == "onCreate" && m.parameterCount == 1 && m.parameterTypes[0] == Bundle::class.java)
-            }?.apply { isAccessible = true }
-                ?.let { gameAdUiHooked.putIfAbsent("${it.declaringClass.name}.${it.name}", it) }
-        }
+        cn.findClassOrNull(classLoader)?.lifecycleMethod()
+            ?.let { gameAdUiHooked.putIfAbsent("${it.declaringClass.name}.${it.name}", it) }
     }
     if (gameAdUiHooked.isEmpty()) {
-        runCatching {
-            val activityClass = classLoader.loadClass("android.app.Activity")
-            GAME_AD_ACTIVITY_CLASS_NAMES.forEach { className ->
-                val clazz = runCatching { classLoader.loadClass(className) }.getOrNull()
-                if (clazz != null && activityClass.isAssignableFrom(clazz)) {
-                    (clazz.declaredMethods + clazz.methods).firstOrNull { m ->
-                        (m.name == "onResume" && m.parameterCount == 0) ||
-                        (m.name == "onStart" && m.parameterCount == 0) ||
-                        (m.name == "onCreate" && m.parameterCount == 1 && m.parameterTypes[0] == Bundle::class.java)
-                    }?.apply { isAccessible = true }
-                        ?.let { gameAdUiHooked.putIfAbsent("${it.declaringClass.name}.${it.name}", it) }
-                }
+        val activityClass = android.app.Activity::class.java
+        GAME_AD_ACTIVITY_CLASS_NAMES.forEach { className ->
+            val clazz = className.findClassOrNull(classLoader)
+            if (clazz != null && activityClass.isAssignableFrom(clazz)) {
+                clazz.lifecycleMethod()
+                    ?.let { gameAdUiHooked.putIfAbsent("${it.declaringClass.name}.${it.name}", it) }
             }
         }
     }
-    gameAdUiHooked.values.forEach { method -> runCatching { hookPlayableAdActivity(method) } }
+    gameAdUiHooked.values.forEach { method -> hookPlayableAdActivity(method) }
 
-    // runCatching { hookGlobalGameAdActivityLifecycleFallback() }
+    // hookGlobalGameAdActivityLifecycleFallback()
 
-    runCatching { hookGameAdActivityLaunchFallbacks() }
+    hookGameAdActivityLaunchFallbacks()
 
-    // runCatching { hookGlobalGameAdSurfaceFallbacks() }
+    // hookGlobalGameAdSurfaceFallbacks()
 
-    runCatching {
-        ::profileReelsAsyncAdsQueryFingerprint.hookMethod {
-            before { param -> param.result = null }
-        }
+    ::profileReelsAsyncAdsQueryFingerprint.hookMethod {
+        before { param -> param.result = null }
     }
 
-    runCatching {
-        hookNewsfeedSponsoredFilter(::newsfeedProcessNewStoriesRunFingerprint.method, classLoader)
-    }
+    hookNewsfeedSponsoredFilter(::newsfeedProcessNewStoriesRunFingerprint.method, classLoader)
 
-    runCatching {
-        fun classesOf(list: List<org.luckypray.dexkit.wrap.DexMethod>) =
-            list.mapNotNull { runCatching { classLoader.loadClass(it.className) }.getOrNull() }.distinct()
-        val components = classesOf(::feedUnitComponentClassesFingerprint.dexMethodList)
-        val wrappers = classesOf(::feedWrapperComponentClassesFingerprint.dexMethodList)
-        installFeedComponentGuard(components, wrappers, FeedItemInspector(emptyList()))
-    }
+    fun classesOf(list: List<org.luckypray.dexkit.wrap.DexMethod>) =
+        list.map { classLoader.loadClass(it.className) }.distinct()
+    installFeedComponentGuard(
+        classesOf(::feedUnitComponentClassesFingerprint.dexMethodList),
+        classesOf(::feedWrapperComponentClassesFingerprint.dexMethodList),
+        FeedItemInspector(emptyList()),
+    )
 
     SponsoredDataCheck.init(classLoader)
 
-    runCatching { ::feedAdChannelBlockMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
-
-    runCatching { ::feedSponsoredRenderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookSponsoredNull(dm.toMethod()) } }
-
-    runCatching { ::reelsAdBlockMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
-
-    runCatching { ::shortsMidCardTypeNodeFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookReceiverSponsoredNull(dm.toMethod()) } }
-
-    runCatching { ::marketplaceSendRequestFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookMarketplaceSendRequest(dm.toMethod()) } }
-
-    runCatching { ::marketplaceAdRenderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookNullAdResult(dm.toMethod()) } }
+    ::feedAdChannelBlockMethodsFingerprint.dexMethodList.forEach { dm -> hookBlockNull(dm.toMethod()) }
+    ::feedSponsoredRenderMethodsFingerprint.dexMethodList.forEach { dm -> hookSponsoredNull(dm.toMethod()) }
+    ::reelsAdBlockMethodsFingerprint.dexMethodList.forEach { dm -> hookBlockNull(dm.toMethod()) }
+    ::shortsMidCardTypeNodeFingerprint.dexMethodList.forEach { dm -> hookReceiverSponsoredNull(dm.toMethod()) }
+    ::marketplaceSendRequestFingerprint.dexMethodList.forEach { dm -> hookMarketplaceSendRequest(dm.toMethod()) }
+    ::marketplaceAdRenderMethodsFingerprint.dexMethodList.forEach { dm -> hookNullAdResult(dm.toMethod()) }
 }

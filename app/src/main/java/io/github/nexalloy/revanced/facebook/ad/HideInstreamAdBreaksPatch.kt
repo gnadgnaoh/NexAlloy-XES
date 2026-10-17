@@ -11,25 +11,14 @@ val HideInstreamAdBreaks = patch(
     name = "Hide in-stream ad breaks",
     description = "Removes mid-roll ad breaks and the docked sponsored card from videos and live replays.",
 ) {
-    val extensionGates = runCatching {
-        ::videoViewerExtensionGateMethodsFingerprint.dexMethodList
-    }.getOrElse {
-        error("Facebook video permalink dex is not visible yet - deferring patch")
-    }
+    // dexMethodList không ném lỗi khi không tìm thấy, nên kiểm tra rỗng để còn hoãn/báo lỗi.
+    // (Bản cũ dùng runCatching{}.getOrElse{ error() } nên chốt này không bao giờ chạy.)
+    val extensionGates = ::videoViewerExtensionGateMethodsFingerprint.dexMethodList
+    check(extensionGates.isNotEmpty()) { "Facebook video permalink dex is not visible yet - deferring patch" }
 
-    extensionGates.forEach { dm ->
-        runCatching { hookVideoViewerExtensionGate(dm.toMethod()) }
-    }
-
-    runCatching { ::adBreakFetchKickoffMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookAdRequestNoOp(dm.toMethod()) } }
-
-    runCatching { ::wasLiveAdBreakControlRenderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookNullAdResult(dm.toMethod()) } }
-
-    runCatching { ::videoAdBlockMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
-
-    runCatching { ::tapToFullscreenAdFetchFingerprint.dexMethodList }.getOrNull().orEmpty()
-        .forEach { dm -> runCatching { hookForceBoolean(dm.toMethod(), false) } }
+    extensionGates.forEach { dm -> hookVideoViewerExtensionGate(dm.toMethod()) }
+    ::adBreakFetchKickoffMethodsFingerprint.dexMethodList.forEach { dm -> hookAdRequestNoOp(dm.toMethod()) }
+    ::wasLiveAdBreakControlRenderMethodsFingerprint.dexMethodList.forEach { dm -> hookNullAdResult(dm.toMethod()) }
+    ::videoAdBlockMethodsFingerprint.dexMethodList.forEach { dm -> hookBlockNull(dm.toMethod()) }
+    ::tapToFullscreenAdFetchFingerprint.dexMethodList.forEach { dm -> hookForceBoolean(dm.toMethod(), false) }
 }

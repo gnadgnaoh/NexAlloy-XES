@@ -7,9 +7,10 @@ val SpoofAdFreeSession = patch(
     name = "Spoof ad-free session",
     description = "Makes Facebook believe an ad-free session is active, so the server stops sending sponsored content (including sponsored Stories tray circles).",
 ) {
-    runCatching { ::sponsoredPoolAddMethodFingerprint.method }.getOrElse {
-        error("Facebook feed dex is not visible yet - deferring patch")
-    }
-    val getters = runCatching { ::adFreeSessionGettersFingerprint.dexMethodList }.getOrNull().orEmpty()
-    getters.forEach { dm -> runCatching { hookForceBoolean(dm.toMethod(), true) } }
+    // Chưa thấy dex feed → ném lỗi → KatanaDexGate thử lại.
+    ::sponsoredPoolAddMethodFingerprint.method
+
+    val getters = ::adFreeSessionGettersFingerprint.dexMethodList
+    check(getters.isNotEmpty()) { "adFreeSessionGettersFingerprint: no getter found" }
+    getters.forEach { dm -> hookForceBoolean(dm.toMethod(), true) }
 }

@@ -9,11 +9,12 @@ val AggressiveAdBlocking = patch(
     description = "Broad upstream hooks: ad-break state machine and banner-ad boolean sweep. May break some screens; off by default.",
     use = false,
 ) {
-    runCatching { ::sponsoredPoolAddMethodFingerprint.method }.getOrElse {
-        error("Facebook feed dex is not visible yet - deferring patch")
-    }
-    val adBreak = runCatching { ::adBreakStateMachineMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-    val banner = runCatching { ::bannerBooleanMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
-    adBreak.forEach { dm -> runCatching { hookBlockNull(dm.toMethod()) } }
-    banner.forEach { dm -> runCatching { hookBannerBoolean(dm.toMethod()) } }
+    // Chưa thấy dex feed → ném lỗi → KatanaDexGate thử lại.
+    ::sponsoredPoolAddMethodFingerprint.method
+
+    val adBreak = ::adBreakStateMachineMethodsFingerprint.dexMethodList
+    val banner = ::bannerBooleanMethodsFingerprint.dexMethodList
+    check(adBreak.isNotEmpty() || banner.isNotEmpty()) { "no ad-break or banner method found" }
+    adBreak.forEach { dm -> hookBlockNull(dm.toMethod()) }
+    banner.forEach { dm -> hookBannerBoolean(dm.toMethod()) }
 }
