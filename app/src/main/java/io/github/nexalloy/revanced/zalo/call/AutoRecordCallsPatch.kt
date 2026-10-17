@@ -21,21 +21,11 @@ val AutoRecordCalls = patch(
         "Default off. Recording calls may require the consent of all parties " +
         "where you live — check local law before enabling.",
 ) {
-    fun <T> resolve(label: String, block: () -> T): T? = runCatching(block)
-        .onFailure { Logger.printInfo { "[Zalo] call recording: $label not resolved (${it.javaClass.simpleName})" } }
-        .getOrNull()
-
     val symbols = ResolvedCallSymbols(
-        callbackImpl = resolve("CallCallback implementation") { ::callCallbackImplFingerprint.clazz },
-        peerAccessor = resolve("peer manager accessor") {
-            ::callPeerManagerAccessorFingerprint.method.apply { isAccessible = true }
-        },
-        peerContainer = resolve("peer container") {
-            ::callPeerContainerField.field.apply { isAccessible = true }
-        },
-        peerHandle = resolve("peer handle") {
-            ::callPeerHandleField.field.apply { isAccessible = true }
-        },
+        callbackImpl = ::callCallbackImplFingerprint.clazz,
+        peerAccessor = ::callPeerManagerAccessorFingerprint.method.apply { isAccessible = true },
+        peerContainer = ::callPeerContainerField.field.apply { isAccessible = true },
+        peerHandle = ::callPeerHandleField.field.apply { isAccessible = true },
     )
     CallRecorder.install(this, symbols)
 }
