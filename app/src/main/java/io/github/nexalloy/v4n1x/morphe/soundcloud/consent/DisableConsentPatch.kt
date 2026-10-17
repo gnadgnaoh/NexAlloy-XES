@@ -23,9 +23,8 @@ val DisableConsent = patch(
         XC_MethodReplacement.returnConstant(noopController)
     )
 
-    val bannerLayoutId =
-        runCatching { ResourceUtils.getLayoutIdentifier(CONSENT_BANNER_LAYOUT) }.getOrDefault(0)
-    if (bannerLayoutId == 0) return@patch
+    val bannerLayoutId = ResourceUtils.getLayoutIdentifier(CONSENT_BANNER_LAYOUT)
+    check(bannerLayoutId != 0) { "layout $CONSENT_BANNER_LAYOUT not found" }
 
     DexMethod("Landroid/view/LayoutInflater;->inflate(ILandroid/view/ViewGroup;Z)Landroid/view/View;")
         .hookMethod {
