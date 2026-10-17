@@ -86,6 +86,10 @@ private val MESSAGE_FIELD_KEYS = listOf(
     "user_id",
     "is_sent_by_viewer",
     "hide_in_thread",
+    "timestamp",
+    "media",
+    "voice_media",
+    "raven_media",
 )
 
 private fun DexKitBridge.messageFields(): Map<String, FieldData> = once("messageFields") {
@@ -127,6 +131,41 @@ internal val messageUserIdField = findFieldDirect { messageField("user_id") }
 internal val messageSentByViewerField = findFieldDirect { messageField("is_sent_by_viewer") }
 
 internal val messageHideInThreadField = findFieldDirect { messageField("hide_in_thread") }
+
+internal val messageTimestampField = findFieldDirect { messageField("timestamp") }
+
+internal val messageMediaField = findFieldDirect { messageField("media") }
+
+internal val messageVoiceMediaField = findFieldDirect { messageField("voice_media") }
+
+internal val messageRavenMediaField = findFieldDirect { messageField("raven_media") }
+
+private fun DexKitBridge.voiceClassName(): String = once("voiceClassName") {
+    messageField("voice_media").typeName
+}
+
+internal val voiceLocalPathMethod = findMethodDirect {
+    findMethod {
+        matcher {
+            declaredClass(voiceClassName())
+            paramCount = 0
+            returnType = STRING
+        }
+    }.single()
+}
+
+internal val voicePlayableMethod = findMethodDirect {
+    val voice = voiceClassName()
+    val localPath = voiceLocalPathMethod(this)
+    findMethod {
+        matcher {
+            paramTypes(voice)
+            addInvoke(localPath.descriptor)
+        }
+    }.single { it.className != voice && it.returnTypeName != "void" && it.isStaticMethod() }
+}
+
+private fun MethodData.isStaticMethod() = java.lang.reflect.Modifier.isStatic(modifiers)
 
 internal val messageParseMethod = findMethodDirect {
     messageParserClass().methods.first(::isJsonEntryPoint)
@@ -223,4 +262,43 @@ internal val threadFindMessageMethod = findMethodDirect {
             returnType = messageClass
         }
     }.first()
+}
+
+internal val threadMergeMethod = findMethodDirect {
+    methodsUsingStrings(listOf("messageIsDirectlyCreatedFromEBResponse", " will replace cached message")) {
+        returnType = "void"
+        paramCount = 6
+    }.single()
+}
+
+internal val messageToRowMethod = findMethodDirect {
+    val table = messageRowDelete().className
+    findMethod {
+        matcher {
+            declaredClass(table)
+            returnType = "android.content.ContentValues"
+            paramCount = 2
+        }
+    }.single {
+        it.paramTypeNames[1] == "java.io.ByteArrayOutputStream" &&
+            it.paramTypeNames[0] != "java.lang.Object"
+    }
+}
+
+internal val messageFromBlobMethod = findMethodDirect {
+    val table = messageRowDelete().className
+    methodsUsingStrings(listOf("DirectMessageSQLiteTable.parseMessage")) {
+        declaredClass(table)
+    }.single { it.paramTypeNames == listOf("byte[]") }
+}
+
+internal val messageTableGetterMethod = findMethodDirect {
+    val table = messageRowDelete().className
+    findMethod {
+        matcher {
+            declaredClass(table)
+            paramTypes("com.instagram.common.session.UserSession")
+            returnType = table
+        }
+    }.single { java.lang.reflect.Modifier.isStatic(it.modifiers) }
 }
