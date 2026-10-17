@@ -3,15 +3,11 @@ package io.github.nexalloy.morphe.twitter.link.unshorten
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
 
-private inline fun safely(block: () -> Unit) {
-    runCatching(block)
-}
-
 val NoShortenedUrl = patch(
     name = "No shortened URL",
     description = "Gets rid of t.co short urls by showing the expanded URL instead.",
 ) {
-    safely {
+    run { // UrlEntity constructor
         var hooked = 0
 
         for (constructor in UrlEntityToStringFingerprint.declaredClass.declaredConstructors) {
@@ -34,7 +30,7 @@ val NoShortenedUrl = patch(
         OpenExternalBrowserFingerprint,
         OpenUrlInAppFingerprint,
     )) {
-        safely {
+        run {
             val method = fingerprint.method
             val urlIndex = method.parameterTypes.indexOfFirst { it == String::class.java }
             check(urlIndex >= 0) { "${method.name} has no String parameter" }
@@ -49,7 +45,7 @@ val NoShortenedUrl = patch(
         LinkWithPostDetailArgsToStringFingerprint,
         WebViewArgsToStringFingerprint,
     )) {
-        safely {
+        run {
             for (constructor in fingerprint.declaredClass.declaredConstructors) {
                 val urlIndex = constructor.parameterTypes.indexOfFirst { it == String::class.java }
                 if (urlIndex < 0) continue
