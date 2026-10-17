@@ -1,6 +1,5 @@
 package io.github.nexalloy.hoodles.morphe.protonvpn.premium
 
-import app.morphe.extension.shared.Logger
 import de.robv.android.xposed.XC_MethodReplacement
 import io.github.nexalloy.enumValueOf
 import io.github.nexalloy.hoodles.morphe.protonvpn.freeservers.FreeServersOnlyServerList
@@ -100,7 +99,7 @@ val UnlockVpnPlus = patch(
         before { param -> param.args[0] = arrayListOf<Any>(standardProfileType) }
     }
 
-    runCatching {
+    run { // profile cities/servers → chỉ server free
         val getServerList = ::vpnCountryGetServerListFingerprint.method
         ::profileServerListReadersFingerprints.dexMethodList.ifEmpty { error("no profile server list readers") }
             .forEach { reader ->
@@ -111,8 +110,6 @@ val UnlockVpnPlus = patch(
                     }
                 })
             }
-    }.onFailure { e ->
-        Logger.printInfo { "Proton VPN: profile cities/servers not limited to free servers: $e" }
     }
     val getVpnCountries = ::serverManager2GetVpnCountriesFingerprint.method
     val getFreeCountries = ::serverManager2GetFreeCountriesFingerprint.method.apply { isAccessible = true }
@@ -126,7 +123,7 @@ val UnlockVpnPlus = patch(
         }
     })
 
-    runCatching {
+    run { // nút đổi server
         val getRandomServer = ::serverManager2GetRandomServerFingerprint.method
         val serverManagerField = ::serverManager2ServerManagerField.field.apply { isAccessible = true }
         val getExitCountries = ::serverManagerExitCountriesFingerprint.method.apply { isAccessible = true }
@@ -134,7 +131,9 @@ val UnlockVpnPlus = patch(
         val collectMethod = ::changeServerViewStateFlowCollectFingerprint.method
         val freeStateField = ::freeUserChangeServerStateField.field.apply { isAccessible = true }
         val flowCollect = collectMethod.declaringClass.interfaces.firstNotNullOf { flow ->
-            runCatching { flow.getMethod(collectMethod.name, *collectMethod.parameterTypes) }.getOrNull()
+            flow.methods.firstOrNull {
+                it.name == collectMethod.name && it.parameterTypes.contentEquals(collectMethod.parameterTypes)
+            }
         }
 
         collectMethod.hookMethod {
@@ -159,13 +158,9 @@ val UnlockVpnPlus = patch(
                     ?.let { param.result = it }
             }
         }
-    }.onFailure { e ->
-        Logger.printInfo { "Proton VPN: change server button not restored: $e" }
     }
 
-    runCatching { dependsOn(SkipUpgradeOnboarding) }.onFailure { e ->
-        Logger.printInfo { "Proton VPN: onboarding dialog not skipped: $e" }
-    }
+    dependsOn(SkipUpgradeOnboarding)
 }
 
 private fun pickRandomFreeServer(
