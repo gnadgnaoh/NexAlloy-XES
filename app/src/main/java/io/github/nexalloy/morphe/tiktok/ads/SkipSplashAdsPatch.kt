@@ -2,7 +2,6 @@ package io.github.nexalloy.morphe.tiktok.ads
 
 import android.app.Activity
 import android.content.Context
-import app.morphe.extension.shared.Logger
 import de.robv.android.xposed.XC_MethodReplacement
 import io.github.nexalloy.findClassOrNull
 import io.github.nexalloy.hookMethod
@@ -28,36 +27,25 @@ val SkipSplashAds = patch(
     description = "Skips the full-screen splash and TopView ads shown when TikTok opens or returns " +
             "from the background, and stops TikTok downloading them.",
 ) {
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
-    optional("showDecision") {
+    run { // showDecision
         val decisions = ::splashShowDecisionFingerprints.dexMethodList.realMatches()
         check(decisions.isNotEmpty()) { "splash show decision not found" }
         decisions.forEach { it.hookMethod(XC_MethodReplacement.returnConstant(false)) }
     }
 
-    SPLASH_TASK_CLASSES.forEach { className ->
-        optional(className.substringAfterLast('.')) {
-            val task = className.findClassOrNull(classLoader) ?: error("class not found")
-            task.getDeclaredMethod("run", Context::class.java)
-                .hookMethod(XC_MethodReplacement.DO_NOTHING)
-        }
+    // Tên class viết cứng, bản nào có thì hook → dò bằng findClassOrNull; cần ít nhất 1.
+    val splashTasks = SPLASH_TASK_CLASSES.mapNotNull { className ->
+        className.findClassOrNull(classLoader)?.declaredMethods
+            ?.firstOrNull { it.name == "run" && it.parameterTypes.contentEquals(arrayOf<Class<*>>(Context::class.java)) }
     }
+    check(splashTasks.isNotEmpty()) { "none of the ${SPLASH_TASK_CLASSES.size} splash tasks found" }
+    splashTasks.forEach { it.hookMethod(XC_MethodReplacement.DO_NOTHING) }
 
-    optional("splashActivity") {
+    run { // splashActivity
         val activity = NORMAL_SPLASH_ACTIVITY.findClassOrNull(classLoader) ?: error("class not found")
         activity.getDeclaredMethod("onCreate", android.os.Bundle::class.java).hookMethod {
             after { param -> (param.thisObject as? Activity)?.finish() }
         }
     }
 
-    check(installed.isNotEmpty()) { "no splash hook could be installed: ${skipped.joinToString("; ")}" }
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }

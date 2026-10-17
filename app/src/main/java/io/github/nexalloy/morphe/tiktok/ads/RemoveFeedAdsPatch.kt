@@ -16,15 +16,6 @@ private const val TAG = "[TikTok ads]"
 internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
     AwemeAdFilter.init(classLoader)
 
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
     val feedApis = ::feedApiFetchFeedListFingerprints.dexMethodList.realMatches()
     check(feedApis.isNotEmpty()) { "IFeedApi.fetchFeedList implementation not found" }
     feedApis.forEach {
@@ -32,9 +23,8 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
             after { param -> filterFeedItemList(param.result, "fetchFeedList") }
         }
     }
-    installed += "fetchFeedList x${feedApis.size}"
 
-    optional("insertItemList") {
+    run { // insertItemList
         val filterPayload: IHookCallback = { param ->
             param.args.forEach { filterSingleListField(it, "insertItemList") }
         }
@@ -43,7 +33,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         inserts.forEach { it.hookMethod { before(filterPayload) } }
     }
 
-    optional("coldStartCache") {
+    run { // coldStartCache
         val coldStart = ::coldStartFeedCacheFingerprints.dexMethodList.realMatches()
         check(coldStart.isNotEmpty()) { "cold-start FeedItemList getter not found" }
         coldStart.forEach {
@@ -53,7 +43,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         }
     }
 
-    optional("videoGrids") {
+    run { // videoGrids
         val filters = ::videoGridAdListFilterFingerprints.dexMethodList.realMatches()
         if (filters.isNotEmpty()) {
             filters.forEach {
@@ -83,7 +73,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         }
     }
 
-    optional("talentProfileAds") {
+    run { // talentProfileAds
         val callbacks = ::talentProfileAdsCallbackFingerprints.dexMethodList.realMatches()
         check(callbacks.isNotEmpty()) { "ProfileTalentShareAdResult reader not found" }
         callbacks.forEach {
@@ -93,7 +83,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         }
     }
 
-    optional("talentProfileAdEvent") {
+    run { // talentProfileAdEvent
         val filterEvent: IHookCallback = { param ->
             param.args.forEach { filterSingleListField(it, "talentProfileAdEvent") }
         }
@@ -109,9 +99,9 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         }
     }
 
-    optional("followingFeed") { hookFollowingFeed() }
+    hookFollowingFeed()
 
-    optional("midRollAds") {
+    run { // midRollAds
         val splices = ::midRollAdSpliceFingerprints.dexMethodList.realMatches()
         check(splices.isNotEmpty()) { "MidAdComponent splice not found" }
         splices.forEach {
@@ -125,7 +115,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         }
     }
 
-    optional("profilePagerAds") {
+    run { // profilePagerAds
         val gates = ::profileAdEligibilityFingerprints.dexMethodList.realMatches()
         check(gates.isNotEmpty()) { "profile_ad_experiment gate not found" }
         gates.forEach {
@@ -135,16 +125,16 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         }
     }
 
-    optional("searchAds") {
+    run { // searchAds
         val results = SEARCH_MIX_FEED_LIST_CLASS.findClassOrNull(classLoader) ?: error("$SEARCH_MIX_FEED_LIST_CLASS not found")
         results.getDeclaredMethod("setRequestId", String::class.java).hookMethod {
             before { param -> filterSearchResults(param.thisObject) }
         }
     }
 
-    optional("friendsFeed") { hookFriendsFeed() }
+    hookFriendsFeed()
 
-    optional("dramaAdLock") {
+    run { // dramaAdLock
         val gates = DRAMA_BLOCKING_AD_SERVICE_CLASS.findClassOrNull(classLoader)?.declaredMethods
             ?.filter {
                 it.returnType == Boolean::class.javaPrimitiveType &&
@@ -157,7 +147,6 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         }
     }
     
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
 
 val RemoveFeedAds = patch(
@@ -234,8 +223,8 @@ private fun PatchExecutor.hookFriendsFeed() {
     response.declaredConstructors.forEach { constructor ->
         constructor.hookMethod { after { param -> filter(param.thisObject, "friendsFeed") } }
     }
-    runCatching { ::friendsFeedSuccessFingerprints.dexMethodList.realMatches() }.getOrNull()
-        ?.forEach {
+    ::friendsFeedSuccessFingerprints.dexMethodList.realMatches()
+        .forEach {
             it.hookMethod { before { param -> param.args.forEach { arg -> filter(arg, "friendsFeedDelivery") } } }
         }
 }
@@ -284,7 +273,7 @@ private fun PatchExecutor.hookFollowingFeed() {
         }
     }
 
-    runCatching { followFeedList.getMethod("getAwemeList") }.getOrNull()?.hookMethod {
+    followFeedList.getMethod("getAwemeList").hookMethod {
         after { param ->
             AwemeAdFilter.filteredCopyOrNull(param.result as? List<*>)?.let { param.result = it }
         }

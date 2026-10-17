@@ -1,6 +1,5 @@
 package io.github.nexalloy.morphe.tiktok.ads
 
-import app.morphe.extension.shared.Logger
 import io.github.nexalloy.getIntFieldOrNull
 import io.github.nexalloy.patch
 import io.github.nexalloy.morphe.tiktok.shared.realMatches
@@ -16,16 +15,7 @@ val HideShopAds = patch(
     AwemeAdFilter.hideShopCards = true
     dependsOn(TikTokFeedFilterHooks)
 
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
-    optional("ecCardRequest") {
+    run { // ecCardRequest
         val builders = ::ecCardRequestFingerprints.dexMethodList.realMatches()
         check(builders.isNotEmpty()) { "IFeedEcCardService request builder not found" }
         builders.forEach {
@@ -41,7 +31,7 @@ val HideShopAds = patch(
         }
     }
 
-    optional("ecSearchCardTypes") {
+    run { // ecSearchCardTypes
         val getters = ::ecSearchCardTypeGetterFingerprints.dexMethodList.realMatches()
         check(getters.isNotEmpty()) { "IEcSearchFeedCardService card type getter not found" }
         getters.forEach {
@@ -60,5 +50,4 @@ val HideShopAds = patch(
         }
     }
 
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
