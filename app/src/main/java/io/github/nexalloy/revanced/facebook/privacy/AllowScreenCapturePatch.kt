@@ -14,33 +14,28 @@ val AllowScreenCapture = patch(
 ) {
     val secure = WindowManager.LayoutParams.FLAG_SECURE
 
-    runCatching {
-        Window::class.java.getDeclaredMethod("setFlags", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-            .hookMethod {
-                before { param ->
-                    param.args[0] = (param.args[0] as Int) and secure.inv()
-                    param.args[1] = (param.args[1] as Int) and secure.inv()
-                }
+    Window::class.java.getDeclaredMethod("setFlags", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+        .hookMethod {
+            before { param ->
+                param.args[0] = (param.args[0] as Int) and secure.inv()
+                param.args[1] = (param.args[1] as Int) and secure.inv()
             }
-    }
-    runCatching {
-        Window::class.java.getDeclaredMethod("addFlags", Int::class.javaPrimitiveType)
-            .hookMethod {
-                before { param -> param.args[0] = (param.args[0] as Int) and secure.inv() }
-            }
-    }
+        }
+    Window::class.java.getDeclaredMethod("addFlags", Int::class.javaPrimitiveType)
+        .hookMethod {
+            before { param -> param.args[0] = (param.args[0] as Int) and secure.inv() }
+        }
 
-    runCatching {
-        appContext.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
-            override fun onActivityResumed(activity: Activity) {
-                runCatching { activity.window.clearFlags(secure) }
-            }
-            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
-            override fun onActivityStarted(activity: Activity) {}
-            override fun onActivityPaused(activity: Activity) {}
-            override fun onActivityStopped(activity: Activity) {}
-            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-            override fun onActivityDestroyed(activity: Activity) {}
-        })
-    }
+    appContext.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityResumed(activity: Activity) {
+            // Chạy lúc app hoạt động (không phải lúc apply) → giữ để không làm sập app.
+            runCatching { activity.window.clearFlags(secure) }
+        }
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+        override fun onActivityStarted(activity: Activity) {}
+        override fun onActivityPaused(activity: Activity) {}
+        override fun onActivityStopped(activity: Activity) {}
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+        override fun onActivityDestroyed(activity: Activity) {}
+    })
 }
