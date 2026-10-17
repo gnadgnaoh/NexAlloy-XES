@@ -13,17 +13,11 @@ val GhostViewOnce = patch(
     name = "Ghost view once",
     description = "Prevents view-once / view-twice seen and replay notifications from being sent.",
 ) {
-    runCatching {
-        ::visualSeenSendFingerprint.hookMethod { before { param -> block(param, "view-once seen") } }
-    }.onFailure { Logger.printException({ "Ghost: view-once seen sender not found" }, it) }
+    ::visualSeenSendFingerprint.hookMethod { before { param -> block(param, "view-once seen") } }
 
-    runCatching {
-        ::visualReplayedSendFingerprint.hookMethod { before { param -> block(param, "view-twice replay") } }
-    }.onFailure { Logger.printException({ "Ghost: replay sender not found" }, it) }
+    ::visualReplayedSendFingerprint.hookMethod { before { param -> block(param, "view-twice replay") } }
 
-    runCatching {
-        ::permanentMediaSeenSendFingerprint.hookMethod { before { param -> block(param, "permanent media seen") } }
-    }.onFailure { Logger.printException({ "Ghost: permanent media seen sender not found" }, it) }
+    ::permanentMediaSeenSendFingerprint.hookMethod { before { param -> block(param, "permanent media seen") } }
 }
 
 private fun block(param: MethodHookParam, what: String) {

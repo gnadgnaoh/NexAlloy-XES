@@ -10,7 +10,6 @@ import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.graphics.Color
-import app.morphe.extension.shared.Logger
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
 
@@ -23,28 +22,26 @@ val GhostViewStoryMentions = patch(
     description = "Adds a button in story options to view (and open) all tagged users " +
             "— including mentions hidden from the story viewer.",
 ) {
-    runCatching {
-        View::class.java.getDeclaredMethod("onAttachedToWindow").hookMethod {
-            after { param ->
-                val view = param.thisObject as? View ?: return@after
-                val ctx = view.context ?: return@after
+    View::class.java.getDeclaredMethod("onAttachedToWindow").hookMethod {
+        after { param ->
+            val view = param.thisObject as? View ?: return@after
+            val ctx = view.context ?: return@after
 
-                if (sCachedStoryOptionsId == 0) {
-                    @SuppressLint("DiscouragedApi")
-                    val id = ctx.resources.getIdentifier(
-                        "reel_viewer_options_container", "id", ctx.packageName
-                    ).takeIf { it != 0 }
-                        ?: ctx.resources.getIdentifier("story_viewer_options", "id", ctx.packageName)
-                    sCachedStoryOptionsId = id
-                }
-
-                if (sCachedStoryOptionsId == 0 || view.id != sCachedStoryOptionsId) return@after
-                val container = view as? ViewGroup ?: return@after
-
-                injectMentionsButton(container, ctx)
+            if (sCachedStoryOptionsId == 0) {
+                @SuppressLint("DiscouragedApi")
+                val id = ctx.resources.getIdentifier(
+                    "reel_viewer_options_container", "id", ctx.packageName
+                ).takeIf { it != 0 }
+                    ?: ctx.resources.getIdentifier("story_viewer_options", "id", ctx.packageName)
+                sCachedStoryOptionsId = id
             }
+
+            if (sCachedStoryOptionsId == 0 || view.id != sCachedStoryOptionsId) return@after
+            val container = view as? ViewGroup ?: return@after
+
+            injectMentionsButton(container, ctx)
         }
-    }.onFailure { Logger.printException({ "GhostViewStoryMentions hook failed" }, it) }
+    }
 }
 
 private fun injectMentionsButton(container: ViewGroup, ctx: Context) {

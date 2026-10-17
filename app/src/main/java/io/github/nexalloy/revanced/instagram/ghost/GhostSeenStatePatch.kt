@@ -21,20 +21,13 @@ val GhostSeenState = patch(
     name = "Ghost seen state",
     description = "Blocks DM read receipts from being sent, while chats you open are still marked as read on this device.",
 ) {
-    val keepLocally = runCatching {
-        SeenModel.init(::seenMarkerClassFingerprint.clazz)
-        LocalSeenStore.init(appContext)
-    }.onFailure { Logger.printException({ "Ghost: local seen store unavailable, chats may turn unread after a refresh" }, it) }
-        .isSuccess
+    SeenModel.init(::seenMarkerClassFingerprint.clazz)
+    LocalSeenStore.init(appContext)
 
-    val senderHooked = runCatching {
-        ::seenMarkerSendFingerprint.hookMethod {
-            before { param -> blockSeenSend(param, keepLocally) }
-        }
-    }.onFailure { Logger.printException({ "Ghost: seen sender not found, blocking mark_thread_seen instead" }, it) }
-        .isSuccess
-
-    if (!senderHooked) {
+    // Dự phòng có chủ đích: không có seen sender thì chặn mark_thread_seen thay thế.
+    val sender = ::seenMarkerSendFingerprint.memberOrNull
+    if (sender == null) {
+        Logger.printInfo { "Ghost: seen sender not found, blocking mark_thread_seen instead" }
         ::seenStateFingerprint.hookMethod {
             before { param ->
                 Logger.printDebug { "Ghost: DM seen state blocked" }
@@ -43,40 +36,35 @@ val GhostSeenState = patch(
         }
         return@patch
     }
+    sender.hookMethod {
+        before { param -> blockSeenSend(param, keepLocally = true) }
+    }
 
-    runCatching {
-        val recompute = ::dmBadgeRecomputeFingerprint.method
-        val badgeClass = recompute.declaringClass
-        DmBadge.init(badgeClass)
-        recompute.hookMethod {
-            before { param ->
-                DmBadge.capture(param.thisObject)
-                DmBadge.beforeRecompute(param.thisObject, param.args.getOrNull(0) as? String)
-            }
+    val recompute = ::dmBadgeRecomputeFingerprint.method
+    val badgeClass = recompute.declaringClass
+    DmBadge.init(badgeClass)
+    recompute.hookMethod {
+        before { param ->
+            DmBadge.capture(param.thisObject)
+            DmBadge.beforeRecompute(param.thisObject, param.args.getOrNull(0) as? String)
         }
-        badgeClass.declaredConstructors.forEach { ctor ->
-            ctor.hookMethod { after { param -> DmBadge.capture(param.thisObject) } }
-        }
-        badgeClass.declaredMethods
-            .filter { !Modifier.isStatic(it.modifiers) && !Modifier.isAbstract(it.modifiers) && it != recompute }
-            .forEach { m -> m.hookMethod { before { param -> DmBadge.capture(param.thisObject) } } }
-    }.onFailure { Logger.printException({ "Ghost: DM badge cache not found, the badge clears on the next server event" }, it) }
+    }
+    badgeClass.declaredConstructors.forEach { ctor ->
+        ctor.hookMethod { after { param -> DmBadge.capture(param.thisObject) } }
+    }
+    badgeClass.declaredMethods
+        .filter { !Modifier.isStatic(it.modifiers) && !Modifier.isAbstract(it.modifiers) && it != recompute }
+        .forEach { m -> m.hookMethod { before { param -> DmBadge.capture(param.thisObject) } } }
 
     // Keep the DM tab badge hidden when the count drops to 0 during its animation (see BadgeDot).
-    runCatching {
-        ::badgeDotFinalizerFingerprint.hookMethod {
-            before { param -> BadgeDot.before(param) }
-            after { param -> BadgeDot.after(param) }
-        }
-    }.onFailure { Logger.printException({ "Ghost: badge dot finalizer not found, a dot may stay until refresh" }, it) }
+    ::badgeDotFinalizerFingerprint.hookMethod {
+        before { param -> BadgeDot.before(param) }
+        after { param -> BadgeDot.after(param) }
+    }
 
-    if (!keepLocally) return@patch
-
-    runCatching {
-        ::threadSeenMarkerGetterFingerprint.hookMethod {
-            after { param -> keepNewerLocalMarker(param) }
-        }
-    }.onFailure { Logger.printException({ "Ghost: seen getter hook failed, chats may turn unread after a refresh" }, it) }
+    ::threadSeenMarkerGetterFingerprint.hookMethod {
+        after { param -> keepNewerLocalMarker(param) }
+    }
 }
 
 private fun blockSeenSend(param: MethodHookParam, keepLocally: Boolean) {
