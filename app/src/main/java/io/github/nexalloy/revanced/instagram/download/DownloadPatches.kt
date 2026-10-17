@@ -13,12 +13,12 @@ import kotlin.reflect.KProperty0
 private fun PatchExecutor.methodsOf(fingerprint: KProperty0<FindMethodListFunc>): List<Method> =
     fingerprint.dexMethodList
         .filterNot { isAnchor(it.declaredClassName, it.isConstructor) || it.isConstructor }
-        .mapNotNull { runCatching { it.toMethod() }.getOrNull() }
+        .map { it.toMethod() }
 
 private fun PatchExecutor.constructorsOf(fingerprint: KProperty0<FindMethodListFunc>): List<Member> =
     fingerprint.dexMethodList
         .filter { it.isConstructor && !isAnchor(it.declaredClassName, true) }
-        .mapNotNull { runCatching { it.toConstructor() }.getOrNull() }
+        .map { it.toConstructor() }
 
 /** Binds the media model (URLs, author, carousel) shared by every download patch. */
 val MediaDownloadCore = patch {
@@ -36,11 +36,9 @@ val MediaDownloadCore = patch {
     MediaResolver.bindAuthorGetter(methodsOf(::mediaAuthorGetterMethods).firstOrNull())
 
     // The url field of VideoUrlImpl is found by constructing a probe instance; no hook needed.
-    runCatching {
-        val ctor = ::videoUrlConstructorFingerprint.constructor
-        val urlArg = VideoUrlProbe.urlArgIndex(ctor)
-        MediaResolver.bindVideoUrlModel(ctor.declaringClass, VideoUrlProbe.urlField(ctor, urlArg))
-    }.onFailure { Logger.printInfo { "MediaDownloadCore: VideoUrl model not bound: $it" } }
+    val ctor = ::videoUrlConstructorFingerprint.constructor
+    val urlArg = VideoUrlProbe.urlArgIndex(ctor)
+    MediaResolver.bindVideoUrlModel(ctor.declaringClass, VideoUrlProbe.urlField(ctor, urlArg))
 
     Logger.printInfo { "MediaDownloadCore: ${MediaResolver.describe()}" }
 }
@@ -54,11 +52,12 @@ val MediaOptionsIntegration = patch {
     }
 
     // Feed post menu: an extra row once per menu, and the allow-list that filters rows.
-    MediaOptionsHook.selectAddRowMethod(methodsOf(::postMenuCreatorVoidMethods))?.hookMethod {
+    (MediaOptionsHook.selectAddRowMethod(methodsOf(::postMenuCreatorVoidMethods))
+        ?: error("post menu add-row method not found")).hookMethod {
         before { MediaOptionsHook.beforeAddRow(it) }
         after { MediaOptionsHook.afterAddRow(it) }
     }
-    methodsOf(::postMenuAllowlistMethods).firstOrNull()?.hookMethod {
+    methodsOf(::postMenuAllowlistMethods).first().hookMethod {
         after { MediaOptionsHook.onAllowlistBuilt(it) }
     }
 
