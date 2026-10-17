@@ -20,16 +20,7 @@ val AllowRestrictedDownloads = patch(
     description = "Shows and enables \"Save video\" (and save photo / GIF / Live Photo) even when " +
         "the creator turned downloads off, and keeps the sound in saved videos.",
 ) {
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
-    optional("downloadVerdicts") {
+    run { // downloadVerdicts
         val share = AWEME_ACL_SHARE_CLASS.findClassOrNull(classLoader) ?: error("$AWEME_ACL_SHARE_CLASS not found")
         val getters = share.declaredMethods.filter {
             it.parameterCount == 0 && it.name.startsWith(DOWNLOAD_ACL_GETTER_PREFIX) &&
@@ -43,7 +34,7 @@ val AllowRestrictedDownloads = patch(
         }
     }
 
-    optional("preventDownload") {
+    run { // preventDownload
         val aweme = AWEME_CLASS.findClassOrNull(classLoader) ?: error("$AWEME_CLASS not found")
         val getters = aweme.declaredMethods.filter {
             it.parameterCount == 0 && it.returnType == Boolean::class.javaPrimitiveType &&
@@ -53,21 +44,18 @@ val AllowRestrictedDownloads = patch(
         getters.forEach { it.hookMethod(XC_MethodReplacement.returnConstant(false)) }
     }
 
-    check(installed.isNotEmpty()) { "no download restriction could be lifted: ${skipped.joinToString("; ")}" }
 
-    optional("deoptimize readers") {
+    run { // deoptimize readers
         val readers = ::downloadPermissionReaderFingerprints.dexMethodList.realMatches()
-            .mapNotNull { runCatching { it.toMember() }.getOrNull() }
+            .map { it.toMember() }
             .distinct()
         check(readers.isNotEmpty()) { "no reader found" }
-        val count = readers.count { reader ->
-            runCatching { XposedBridge::class.java.callStaticMethod("deoptimizeMethod", reader as Member) }.isSuccess
+        readers.forEach { reader ->
+            XposedBridge::class.java.callStaticMethod("deoptimizeMethod", reader as Member)
         }
-        check(count > 0) { "deoptimizeMethod unavailable" }
-        Logger.printDebug { "$TAG $count/${readers.size} readers deoptimized" }
+        Logger.printDebug { "$TAG ${readers.size} readers deoptimized" }
     }
 
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
 
 private fun unlockDownload(acl: Any) {
