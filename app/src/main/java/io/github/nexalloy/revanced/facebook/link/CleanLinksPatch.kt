@@ -20,15 +20,14 @@ val CleanLinks = patch(
                     it.parameterCount in 1..2 && it.parameterTypes[0] == Intent::class.java
             }
             .forEach { m ->
-                runCatching {
-                    m.hookMethod {
-                        before { param ->
-                            runCatching {
-                                val intent = param.args.getOrNull(0) as? Intent ?: return@runCatching
-                                val url = intent.dataString ?: return@runCatching
-                                val unwrapped = unwrapFacebookRedirect(url) ?: return@runCatching
-                                intent.data = Uri.parse(unwrapped)
-                            }
+                m.hookMethod {
+                    before { param ->
+                        // Chạy lúc app mở link (runtime) → giữ để không làm hỏng việc mở link.
+                        runCatching {
+                            val intent = param.args.getOrNull(0) as? Intent ?: return@runCatching
+                            val url = intent.dataString ?: return@runCatching
+                            val unwrapped = unwrapFacebookRedirect(url) ?: return@runCatching
+                            intent.data = Uri.parse(unwrapped)
                         }
                     }
                 }
