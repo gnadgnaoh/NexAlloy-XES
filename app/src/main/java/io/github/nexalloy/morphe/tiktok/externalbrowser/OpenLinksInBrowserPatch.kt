@@ -24,16 +24,7 @@ val OpenLinksInBrowser = patch(
 ) {
     TikTokServices.init(classLoader)
 
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
-    optional("bioLinks") {
+    run { // bioLinks
         val thirdContext = SPARK_THIRD_CONTEXT_CLASS.findClassOrNull(classLoader) ?: error("$SPARK_THIRD_CONTEXT_CLASS not found")
         val routers = ::sparkThirdRouterOpenFingerprints.dexMethodList.realMatches()
         check(routers.isNotEmpty()) { "SparkThird router not found" }
@@ -49,7 +40,7 @@ val OpenLinksInBrowser = patch(
         }
     }
 
-    optional("storyLinkStickers") {
+    run { // storyLinkStickers
         val sticker = INTERACT_STICKER_CLASS.findClassOrNull(classLoader) ?: error("$INTERACT_STICKER_CLASS not found")
         val sheets = ::storyLinkSheetFingerprints.dexMethodList.realMatches()
         check(sheets.isNotEmpty()) { "story link sheet not found" }
@@ -66,8 +57,6 @@ val OpenLinksInBrowser = patch(
         }
     }
 
-    check(installed.isNotEmpty()) { "no link hook could be installed: ${skipped.joinToString("; ")}" }
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
 
 internal object ExternalBrowser {
