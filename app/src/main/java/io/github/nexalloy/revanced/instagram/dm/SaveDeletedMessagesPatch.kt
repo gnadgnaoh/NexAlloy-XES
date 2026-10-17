@@ -68,34 +68,26 @@ val SaveDeletedMessages = patch(
         userId = ::messageUserIdField.dexField,
         sentByViewer = ::messageSentByViewerField.dexField,
         hideInThread = ::messageHideInThreadField.dexField,
-        timestamp = runCatching { ::messageTimestampField.dexField }.getOrNull(),
-        mediaFields = listOfNotNull(
-            runCatching { ::messageMediaField.dexField }.getOrNull(),
-            runCatching { ::messageRavenMediaField.dexField }.getOrNull(),
+        timestamp = ::messageTimestampField.dexField,
+        mediaFields = listOf(
+            ::messageMediaField.dexField,
+            ::messageRavenMediaField.dexField,
         ),
-        voiceMedia = runCatching { ::messageVoiceMediaField.dexField }.getOrNull(),
+        voiceMedia = ::messageVoiceMediaField.dexField,
     )
     val kept = KeptMessages()
 
     val keptMedia = KeptMediaIds(appContext)
-    val voicePlayable = runCatching { ::voicePlayableMethod.method.apply { isAccessible = true } }
-        .onFailure { Logger.printException({ "SaveDeletedMessages: voice source builder unresolved" }, it) }
-        .getOrNull()
+    val voicePlayable = ::voicePlayableMethod.method.apply { isAccessible = true }
     val media = UnsentMediaCache(appContext, message, keptMedia, voicePlayable)
     keptMedia.onEvict = { ids -> media.drop(ids) }
 
     val shadow = ShadowStore(
         appContext,
         message,
-        toRow = runCatching { ::messageToRowMethod.method.apply { isAccessible = true } }
-            .onFailure { Logger.printException({ "F5: row serializer unresolved" }, it) }
-            .getOrNull(),
-        fromBlob = runCatching { ::messageFromBlobMethod.method.apply { isAccessible = true } }
-            .onFailure { Logger.printException({ "F5: row parser unresolved" }, it) }
-            .getOrNull(),
-        tableGetter = runCatching { ::messageTableGetterMethod.method.apply { isAccessible = true } }
-            .onFailure { Logger.printException({ "F5: table getter unresolved" }, it) }
-            .getOrNull(),
+        toRow = ::messageToRowMethod.method.apply { isAccessible = true },
+        fromBlob = ::messageFromBlobMethod.method.apply { isAccessible = true },
+        tableGetter = ::messageTableGetterMethod.method.apply { isAccessible = true },
     )
     fun warmUp(holder: Any?) {
         if (shadow.table == null) message.sessionOf(holder)?.let(shadow::tableFrom)
@@ -109,12 +101,8 @@ val SaveDeletedMessages = patch(
         shadow.save(target) // F5 backup
     }
 
-    val findThread = runCatching { ::threadStateLookupMethod.method.apply { isAccessible = true } }
-        .onFailure { Logger.printException({ "SaveDeletedMessages: thread lookup unresolved" }, it) }
-        .getOrNull()
-    val findMessage = runCatching { ::threadFindMessageMethod.method.apply { isAccessible = true } }
-        .onFailure { Logger.printException({ "SaveDeletedMessages: message lookup unresolved" }, it) }
-        .getOrNull()
+    val findThread = ::threadStateLookupMethod.method.apply { isAccessible = true }
+    val findMessage = ::threadFindMessageMethod.method.apply { isAccessible = true }
 
     ::threadRemoveMessageMethod.hookMethod {
         before { param ->
@@ -125,13 +113,13 @@ val SaveDeletedMessages = patch(
             val store = param.thisObject
             val threadKey = param.args?.getOrNull(0)
             warmUp(store)
-            val thread = if (findThread != null && findMessage != null && store != null && threadKey != null)
+            val thread = if (store != null && threadKey != null)
                 runCatching { findThread.invoke(store, threadKey) }.getOrNull() else null
 
             if (thread != null) {
                 for (arg in param.args.orEmpty()) {
                     val id = (arg as? String)?.takeIf { it.isNotEmpty() } ?: continue
-                    val target = runCatching { findMessage!!.invoke(thread, id) }.getOrNull() ?: continue
+                    val target = runCatching { findMessage.invoke(thread, id) }.getOrNull() ?: continue
                     if (!message.isFromSomeoneElse(target)) continue
 
                     message.unhide(target)
@@ -197,60 +185,50 @@ val SaveDeletedMessages = patch(
         }
     }
 
-    runCatching {
-        ::voiceLocalPathMethod.hookMethod {
-            after { param ->
-                if (!(param.result as? String).isNullOrEmpty()) return@after
-                media.localVoicePath(param.thisObject)?.let { param.result = it }
-            }
+    ::voiceLocalPathMethod.hookMethod {
+        after { param ->
+            if (!(param.result as? String).isNullOrEmpty()) return@after
+            media.localVoicePath(param.thisObject)?.let { param.result = it }
         }
-    }.onFailure {
-        Logger.printException({ "SaveDeletedMessages: voice hook unavailable, unsent voice messages won't play" }, it)
     }
 
-    runCatching {
-        ::messageToRowMethod.hookMethod {
-            after { param ->
-                shadow.table = param.thisObject
-                val msg = param.args?.getOrNull(0) ?: return@after
-                if (!keptMedia.contains(message.itemId(msg), message.clientContext(msg))) return@after
-                shadow.saveRow(msg, param.result as? ContentValues)
+    ::messageToRowMethod.hookMethod {
+        after { param ->
+            shadow.table = param.thisObject
+            val msg = param.args?.getOrNull(0) ?: return@after
+            if (!keptMedia.contains(message.itemId(msg), message.clientContext(msg))) return@after
+            shadow.saveRow(msg, param.result as? ContentValues)
+        }
+    }
+
+    val threadListFields: List<Field> = ::threadMergeMethod.method.declaringClass.declaredFields
+        .filter { java.util.List::class.java.isAssignableFrom(it.type) && !Modifier.isStatic(it.modifiers) }
+        .onEach { it.isAccessible = true }
+
+    ::threadMergeMethod.hookMethod {
+        after { param ->
+            val args = param.args ?: return@after
+            val thread = args.getOrNull(0)
+            warmUp(thread)
+            @Suppress("UNCHECKED_CAST")
+            val cached = args.getOrNull(1) as? MutableList<Any?> ?: return@after
+            val server = args.getOrNull(2) as? List<*>
+            val key = cached.firstNotNullOfOrNull { message.threadKey(it) }
+                ?: server.orEmpty().firstNotNullOfOrNull { message.threadKey(it) }
+                ?: thread?.let(::findThreadKey)
+                ?: return@after
+            val backups = shadow.itemIdsOfThread(key)
+            if (backups.isEmpty()) return@after
+            val ownList = thread != null && threadListFields.any {
+                runCatching { it.get(thread) }.getOrNull() === cached
+            }
+            if (!ownList) return@after
+            shadow.restoreInto(cached, key) { restoredMsg ->
+                // Protect it again for the original in-memory hooks (lost on restart).
+                kept.protect(message.itemId(restoredMsg), message.clientContext(restoredMsg))
             }
         }
-    }.onFailure { Logger.printException({ "F5: row serializer hook failed" }, it) }
-
-    val threadListFields: List<Field> = runCatching {
-        ::threadMergeMethod.method.declaringClass.declaredFields
-            .filter { java.util.List::class.java.isAssignableFrom(it.type) && !Modifier.isStatic(it.modifiers) }
-            .onEach { it.isAccessible = true }
-    }.getOrDefault(emptyList())
-
-    runCatching {
-        ::threadMergeMethod.hookMethod {
-            after { param ->
-                val args = param.args ?: return@after
-                val thread = args.getOrNull(0)
-                warmUp(thread)
-                @Suppress("UNCHECKED_CAST")
-                val cached = args.getOrNull(1) as? MutableList<Any?> ?: return@after
-                val server = args.getOrNull(2) as? List<*>
-                val key = cached.firstNotNullOfOrNull { message.threadKey(it) }
-                    ?: server.orEmpty().firstNotNullOfOrNull { message.threadKey(it) }
-                    ?: thread?.let(::findThreadKey)
-                    ?: return@after
-                val backups = shadow.itemIdsOfThread(key)
-                if (backups.isEmpty()) return@after
-                val ownList = thread != null && threadListFields.any {
-                    runCatching { it.get(thread) }.getOrNull() === cached
-                }
-                if (!ownList) return@after
-                shadow.restoreInto(cached, key) { restoredMsg ->
-                    // Protect it again for the original in-memory hooks (lost on restart).
-                    kept.protect(message.itemId(restoredMsg), message.clientContext(restoredMsg))
-                }
-            }
-        }
-    }.onFailure { Logger.printException({ "F5: merge hook unavailable" }, it) }
+    }
 
 
 }
@@ -267,11 +245,9 @@ private class MessageAccess(
     voiceMedia: DexField?,
 ) {
     private fun resolve(ref: DexField?): Field? = ref?.let {
-        runCatching {
-            classLoader.loadClass(it.className)
-                .getDeclaredField(it.name)
-                .apply { isAccessible = true }
-        }.getOrNull()
+        classLoader.loadClass(it.className)
+            .getDeclaredField(it.name)
+            .apply { isAccessible = true }
     }
 
     private val messageClass: Class<*> = classLoader.loadClass(itemId.className)
