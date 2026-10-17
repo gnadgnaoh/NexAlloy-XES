@@ -16,46 +16,32 @@ val RemoveDownloadWatermark = patch(
     name = "Remove download watermark",
     description = "Saves videos and photos without the TikTok watermark.",
 ) {
-    val installed = mutableListOf<String>()
-    val skipped = mutableListOf<String>()
-
-    fun optional(label: String, block: () -> Unit) {
-        runCatching(block)
-            .onSuccess { installed += label }
-            .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
-    }
-
     val transcode: Method = ACL_COMMON_SHARE_CLASS.findClassOrNull(classLoader)
-        ?.let { runCatching { it.getDeclaredMethod(TRANSCODE_GETTER) }.getOrNull() }
-        ?: AclCommonShareTranscodeFingerprint.method
+        ?.declaredMethods?.firstOrNull { it.name == TRANSCODE_GETTER && it.parameterCount == 0 }
+        ?: AclCommonShareTranscodeFingerprint.method // dự phòng khi tên bị đổi
 
     check(transcode.returnType == Int::class.javaPrimitiveType) {
         "$TRANSCODE_GETTER returns ${transcode.returnType.simpleName}, not int"
     }
     transcode.hookMethod(XC_MethodReplacement.returnConstant(TRANSCODE_NO_WATERMARK))
-    installed += "transcode=$TRANSCODE_NO_WATERMARK"
 
-    optional("clean address fallback") {
+    run { // clean address fallback
         val cleanAddr = VIDEO_CLASS.findClassOrNull(classLoader)
-            ?.let { runCatching { it.getDeclaredMethod(CLEAN_ADDR_GETTER) }.getOrNull() }
+            ?.declaredMethods?.firstOrNull { it.name == CLEAN_ADDR_GETTER && it.parameterCount == 0 }
             ?: error("$VIDEO_CLASS.$CLEAN_ADDR_GETTER not found")
         CleanDownloadAddress.install(cleanAddr)
     }
 
-    optional("deoptimize readers") {
+    run { // deoptimize readers
         val readers = (::transcodeReaderFingerprints.dexMethodList + ::cleanAddrReaderFingerprints.dexMethodList)
-            .mapNotNull { runCatching { it.toMethod() }.getOrNull() }
+            .map { it.toMethod() }
             .distinct()
         check(readers.isNotEmpty()) { "no reader of $TRANSCODE_GETTER or $CLEAN_ADDR_GETTER found" }
 
-        val count = readers.count { reader ->
-            runCatching {
-                XposedBridge::class.java.callStaticMethod("deoptimizeMethod", reader as Member)
-            }.isSuccess
+        readers.forEach { reader ->
+            XposedBridge::class.java.callStaticMethod("deoptimizeMethod", reader as Member)
         }
-        check(count > 0) { "deoptimizeMethod unavailable" }
-        Logger.printDebug { "$TAG ${count}/${readers.size} readers deoptimized" }
+        Logger.printDebug { "$TAG ${readers.size} readers deoptimized" }
     }
 
-    Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
