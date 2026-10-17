@@ -1,7 +1,6 @@
 package io.github.nexalloy.hoodles.morphe.protonvpn.upselling
 
 import android.view.View
-import app.morphe.extension.shared.Logger
 import io.github.nexalloy.hoodles.morphe.protonvpn.freeservers.serverGroupsMainScreenStateConstructor
 import io.github.nexalloy.morphe.ResourceType
 import io.github.nexalloy.morphe.getResourceId
@@ -30,10 +29,6 @@ val HideUpgradePromotions = patch(
     name = "Hide upgrade promotions",
     description = "Hides settings that need a paid plan, upgrade banners, the Discover VPN Plus carousel and special offers.",
 ) {
-    fun optional(what: String, block: () -> Unit) = runCatching(block).onFailure { e ->
-        Logger.printInfo { "Proton VPN: $what not hidden: $e" }
-    }
-
     fun isPromo(notification: Any?): Boolean {
         val type = notification?.javaClass?.getMethod("getType")?.invoke(notification) as? Int
         return type in PROMO_NOTIFICATION_TYPES
@@ -55,7 +50,7 @@ val HideUpgradePromotions = patch(
         }
     }
 
-    optional("VPN Plus badge rows") {
+    run { // VPN Plus badge rows
         val plusBadge = getResourceId(ResourceType.DRAWABLE, "vpn_plus_badge")
         ::settingRowWithIconFingerprint.hookMethod {
             before { param ->
@@ -64,7 +59,7 @@ val HideUpgradePromotions = patch(
         }
     }
 
-    optional("restricted setting items") {
+    run { // restricted setting items
         val stateClass = ::settingsValueItemFingerprint.method.parameterTypes.first()
         val restrictedField = stateClass.declaredFields.single { it.type == Boolean::class.javaPrimitiveType }
             .apply { isAccessible = true }
@@ -76,7 +71,7 @@ val HideUpgradePromotions = patch(
         }
     }
 
-    optional("server list upgrade banner") {
+    run { // server list upgrade banner
         val bannerClass = ::serverGroupBannerClass.clazz
         ::serverGroupsMainScreenStateConstructor.hookMethod {
             before { param ->
@@ -88,7 +83,7 @@ val HideUpgradePromotions = patch(
         }
     }
 
-    optional("upgrade carousel") {
+    run { // upgrade carousel
         val stateClass = ::upsellCarouselStateClass.clazz
         ::upgradeCarouselFingerprints.dexMethodList.ifEmpty { error("no producer") }.forEach { producer ->
             producer.hookMethod {
@@ -97,13 +92,13 @@ val HideUpgradePromotions = patch(
         }
     }
 
-    optional("account upgrade banner") {
+    run { // account upgrade banner
         ::accountSettingsViewStateConstructor.hookMethod {
             before { param -> param.args[5] = false }
         }
     }
 
-    optional("upgrade onboarding dialog") {
+    run { // upgrade onboarding dialog
         dependsOn(SkipUpgradeOnboarding)
     }
 }
