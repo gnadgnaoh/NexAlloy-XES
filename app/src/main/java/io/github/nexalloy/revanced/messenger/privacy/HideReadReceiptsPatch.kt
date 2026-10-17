@@ -9,21 +9,17 @@ val HideReadReceipts = patch(
         "Chats you open may stay unread on this device.",
     use = false,
 ) {
-    runCatching {
-        ::plainReadReceiptRunnableFingerprint.hookMethod {
-            before { param ->
-                Logger.printDebug { "Messenger: plain read receipt blocked" }
-                param.result = null
-            }
+    ::plainReadReceiptRunnableFingerprint.hookMethod {
+        before { param ->
+            Logger.printDebug { "Messenger: plain read receipt blocked" }
+            param.result = null
         }
-    }.onFailure { Logger.printException({ "Messenger: plain read-receipt hook failed" }, it) }
+    }
 
-    runCatching {
-        ::encryptedReadReceiptFingerprint.hookMethod {
-            before { param ->
-                Logger.printDebug { "Messenger: encrypted read receipt blocked" }
-                param.result = null
-            }
+    ::encryptedReadReceiptFingerprint.hookMethod {
+        before { param ->
+            Logger.printDebug { "Messenger: encrypted read receipt blocked" }
+            param.result = null
         }
-    }.onFailure { Logger.printException({ "Messenger: encrypted read-receipt hook failed" }, it) }
+    }
 }

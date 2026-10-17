@@ -7,25 +7,21 @@ val HideTypingIndicator = patch(
     name = "Hide typing indicator",
     description = "Stops sending your typing status in normal and end-to-end encrypted chats.",
 ) {
-    runCatching {
-        ::plainTypingRunnablesFingerprint.dexMethodList.forEach { dexMethod ->
-            dexMethod.hookMethod {
-                before { param ->
-                    Logger.printDebug { "Messenger: plain typing signal blocked" }
-                    param.result = null
-                }
-            }
-        }
-    }.onFailure { Logger.printException({ "Messenger: plain typing hook failed" }, it) }
-
-    runCatching {
-        ::encryptedTypingFingerprint.hookMethod {
+    ::plainTypingRunnablesFingerprint.dexMethodList.forEach { dexMethod ->
+        dexMethod.hookMethod {
             before { param ->
-                if (param.args?.getOrNull(1) == true) {
-                    param.args[1] = false
-                    Logger.printDebug { "Messenger: encrypted typing flag cleared" }
-                }
+                Logger.printDebug { "Messenger: plain typing signal blocked" }
+                param.result = null
             }
         }
-    }.onFailure { Logger.printException({ "Messenger: encrypted typing hook failed" }, it) }
+    }
+
+    ::encryptedTypingFingerprint.hookMethod {
+        before { param ->
+            if (param.args?.getOrNull(1) == true) {
+                param.args[1] = false
+                Logger.printDebug { "Messenger: encrypted typing flag cleared" }
+            }
+        }
+    }
 }
