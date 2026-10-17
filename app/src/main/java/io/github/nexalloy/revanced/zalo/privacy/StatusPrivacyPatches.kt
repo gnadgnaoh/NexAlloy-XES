@@ -17,23 +17,8 @@ internal fun PatchExecutor.installChokepoints(
     context: String,
     chokepoints: List<Chokepoint>,
 ) {
-    val hooked = mutableListOf<String>()
-    val missed = mutableListOf<String>()
-
-    chokepoints.forEach { cp ->
-        runCatching { cp.fingerprint.hookMethod { before(cp.block) } }
-            .onSuccess { hooked += cp.label }
-            .onFailure { missed += "${cp.label} (${it.javaClass.simpleName})" }
-    }
-
-    if (missed.isNotEmpty()) {
-        Logger.printInfo { "[Zalo] $context — layers not hooked: ${missed.joinToString()}" }
-    }
-    Logger.printInfo { "[Zalo] $context — active layers: ${hooked.joinToString().ifEmpty { "none" }}" }
-
-    check(hooked.isNotEmpty()) {
-        "$context: no chokepoint could be hooked (${missed.joinToString()})"
-    }
+    chokepoints.forEach { cp -> cp.fingerprint.hookMethod { before(cp.block) } }
+    Logger.printInfo { "[Zalo] $context — active layers: ${chokepoints.joinToString { it.label }}" }
 }
 
 private fun blockWhenSeen(argIndex: Int): IHookCallback = { param ->
