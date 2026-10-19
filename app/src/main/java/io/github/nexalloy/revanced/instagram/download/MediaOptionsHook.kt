@@ -10,14 +10,6 @@ import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Download / Copy link entries in the post and reel overflow menus.
- *
- * Both menus use `MediaOption.Option`. We make sure DOWNLOAD and COPY_LINK are offered (post
- * menu: allow-list + an extra row; reel menu: the option list), then intercept the option
- * dispatchers. The dispatcher's redex class name tells the surface apart:
- * `MediaOptionsOverflowHelper` = feed post, `ClipsOrganicMoreOptionsHelper` = reel.
- */
 internal object MediaOptionsHook {
 
     private const val REEL_HELPER = "ClipsOrganicMoreOptionsHelper"
@@ -28,18 +20,22 @@ internal object MediaOptionsHook {
     var copyLinkOption: Any? = null
         private set
 
+    private val AUDIO_CARRIERS = listOf("DEBUG_MEDIA", "MEDIA_LOGGING", "DEBUG_AD")
+    var audioOption: Any? = null
+        private set
+    private var downloadIcon: Int? = null
+
     fun loadOptionEnum(cl: ClassLoader): Boolean {
-        // Không nạp được enum MediaOption → ném lỗi lên patch (toast + log).
         val cls = cl.loadClass(MEDIA_OPTION_CLASS)
         optionClass = cls
         val values = cls.getMethod("values").invoke(null) as Array<*>
         downloadOption = values.firstOrNull { it?.toString() == "DOWNLOAD" }
         copyLinkOption = values.firstOrNull { it?.toString() == "COPY_LINK" }
+        audioOption = AUDIO_CARRIERS.firstNotNullOfOrNull { name -> values.firstOrNull { it?.toString() == name } }
+        downloadIcon = runCatching { cls.getMethod("getIconDrawable").invoke(downloadOption) as? Int }.getOrNull()
         ModuleLog.line("(NA|Menu) DOWNLOAD=${downloadOption != null} COPY_LINK=${copyLinkOption != null}")
         return downloadOption != null || copyLinkOption != null
     }
-
-    // region post menu rows
 
     private var addRowMethod: Method? = null
     private var creatorClass: Class<*>? = null
@@ -51,7 +47,6 @@ internal object MediaOptionsHook {
     private val addingRow = ThreadLocal.withInitial { false }
     private val processedCreators: MutableSet<Any> = Collections.newSetFromMap(WeakHashMap())
 
-    /** `static void addRow(ButtonType enum, Option, Creator, CharSequence, ArrayList, …)`. */
     fun selectAddRowMethod(candidates: List<Method>): Method? {
         val option = optionClass ?: return null
         for (m in candidates) {
@@ -95,7 +90,6 @@ internal object MediaOptionsHook {
             ?: values.firstOrNull()
     }
 
-    /** Drops Instagram's own DOWNLOAD / COPY_LINK row; ours is added once per menu instead. */
     fun beforeAddRow(param: XC_MethodHook.MethodHookParam) {
         if (addingRow.get() == true) return
         val opt = param.args[idxOption]
@@ -107,12 +101,15 @@ internal object MediaOptionsHook {
     fun afterAddRow(param: XC_MethodHook.MethodHookParam) {
         if (addingRow.get() == true) return
         val opt = param.args[idxOption]
-        if (opt === downloadOption || opt === copyLinkOption) return
+        if (opt === downloadOption || opt === copyLinkOption || opt === audioOption) return
         val creator = param.args[idxCreator] ?: return
         synchronized(processedCreators) { if (!processedCreators.add(creator)) return }
 
         val app = AndroidAppHelper.currentApplication()
         if (wantsPostDownload()) injectRow(param, downloadOption, I18n.t(app, R.string.ig_dl_title))
+        if (wantsPostDownload() && hasAudio(MediaResolver.fieldOfType(creator, MediaResolver.mediaType))) {
+            injectRow(param, audioOption, I18n.t(app, R.string.ig_dl_audio_title))
+        }
         if (FeatureFlags.copyMediaLink) injectRow(param, copyLinkOption, I18n.t(app, R.string.ig_copy_link_title))
     }
 
@@ -137,16 +134,13 @@ internal object MediaOptionsHook {
         val original = param.result as? List<*> ?: return
         val add = ArrayList<Any>(2)
         if (wantsPostDownload()) downloadOption?.takeIf { it !in original }?.let { add.add(it) }
+        if (wantsPostDownload()) audioOption?.takeIf { it !in original }?.let { add.add(it) }
         if (FeatureFlags.copyMediaLink) copyLinkOption?.takeIf { it !in original }?.let { add.add(it) }
         if (add.isEmpty()) return
         param.result = ArrayList<Any?>(original).apply { addAll(add) }
     }
 
     private fun wantsPostDownload() = FeatureFlags.enablePostDownload && downloadOption != null
-
-    // endregion
-
-    // region reel option list
 
     @Suppress("UNCHECKED_CAST")
     fun onReelOptionsBuilt(param: XC_MethodHook.MethodHookParam) {
@@ -157,13 +151,38 @@ internal object MediaOptionsHook {
         }
     }
 
-    // endregion
+    private var reelRowAdder: Method? = null
+    private val addingReelRow = ThreadLocal.withInitial { false }
 
-    // region dispatch
+    fun bindReelRowAdder(method: Method) {
+        reelRowAdder = method.apply { isAccessible = true }
+    }
+
+    fun afterReelRowAdded(param: XC_MethodHook.MethodHookParam) {
+        if (addingReelRow.get() == true || !FeatureFlags.enableReelDownload) return
+        if (param.args[1] !== downloadOption) return
+        val carrier = audioOption ?: return
+        val adder = reelRowAdder ?: return
+        val helper = param.thisObject ?: return
+        if (!hasAudio(mediaOf(helper))) return
+        val ctx = param.args[0] as? Context ?: return
+        addingReelRow.set(true)
+        try {
+            adder.invoke(helper, ctx, carrier, param.args[2], param.args[3], downloadIcon, I18n.t(ctx, R.string.ig_dl_audio_title))
+        } catch (t: Throwable) {
+            ModuleLog.line("(NA|Menu) reel audio row failed: $t")
+        } finally {
+            addingReelRow.set(false)
+        }
+    }
+
+    private fun hasAudio(media: Any?): Boolean = media != null && runCatching {
+        val children = MediaResolver.carouselChildren(media)
+        if (children.size >= 2) children.any { AudioSource.of(it, media) != null } else AudioSource.of(media) != null
+    }.getOrDefault(false)
 
     fun selectDispatchers(candidates: List<Method>): List<Method> {
         val instance = candidates.filterNot { Modifier.isStatic(it.modifiers) }
-        // Private overloads are internal steps of a public dispatcher; hooking both is redundant.
         val hasPublic = instance.any { Modifier.isPublic(it.modifiers) }
         return instance.filter { !hasPublic || !Modifier.isPrivate(it.modifiers) }
             .onEach { it.isAccessible = true }
@@ -183,7 +202,8 @@ internal object MediaOptionsHook {
         val option = param.args.firstOrNull { it != null && optionClass?.isInstance(it) == true } ?: return
         val isDownload = option === downloadOption
         val isCopy = option === copyLinkOption
-        if (!isDownload && !isCopy) return
+        val isAudio = option === audioOption && option != null
+        if (!isDownload && !isCopy && !isAudio) return
 
         val helper = param.thisObject ?: return
         val surface = surfaceOf(helper.javaClass)
@@ -204,6 +224,8 @@ internal object MediaOptionsHook {
             return
         }
 
+        if (isAudio) return saveAudio(ctx, helper, media, surface)
+
         MediaSaver.executor.submit {
             val items = MediaResolver.items(ctx, media)
             val username = MediaResolver.username(media)
@@ -221,7 +243,31 @@ internal object MediaOptionsHook {
         }
     }
 
-    /** Reel helper holds the Media; the post helper holds the menu creator, which holds it. */
+    private fun saveAudio(ctx: Context, helper: Any, media: Any, surface: MediaKind) {
+        val children = MediaResolver.carouselChildren(media)
+        val index = if (children.size >= 2) {
+            CarouselIndex.fromWindow(ctx, children.size).takeIf { it >= 0 } ?: CarouselIndex.fromFields(helper, children.size)
+        } else -1
+        val target = children.getOrNull(index) ?: media
+        MediaSaver.executor.submit {
+            val audio = AudioSource.of(target, media)
+            if (audio == null) {
+                MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_toast_no_audio))
+                return@submit
+            }
+            MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_toast_downloading_audio))
+            val username = MediaResolver.username(media)
+            val name = MediaSaver.buildFilename(username, "${surface.tag}_audio", MediaResolver.mediaId(media), false, index)
+                .substringBeforeLast('.') + ".m4a"
+            runCatching { MediaSaver.saveAudio(ctx, audio.url, name, username, audio.fromMs, audio.lengthMs) }
+                .onSuccess { MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_toast_audio_saved)) }
+                .onFailure {
+                    ModuleLog.line("(NA|DL) audio failed: $it")
+                    MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_toast_download_failed, it.message ?: it.javaClass.simpleName))
+                }
+        }
+    }
+
     private fun mediaOf(helper: Any): Any? {
         MediaResolver.fieldOfType(helper, MediaResolver.mediaType)?.let { return it }
         creatorClass?.let { cc ->
@@ -230,6 +276,4 @@ internal object MediaOptionsHook {
         }
         return MediaResolver.findMedia(helper, 2)
     }
-
-    // endregion
 }

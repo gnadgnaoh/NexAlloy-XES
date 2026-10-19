@@ -25,11 +25,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import io.github.nexalloy.R
+import io.github.nexalloy.revanced.shared.media.Dash
 
-/** Downloading and storing files, plus the threads everything else runs on. */
 internal object MediaSaver {
 
-    /** At most 3 parallel downloads; resolution work shares the same pool. */
     @JvmField
     val executor: ExecutorService = Executors.newFixedThreadPool(3) { r ->
         Thread(r, "NexAlloy-IG-DL").apply { isDaemon = true }
@@ -63,7 +62,6 @@ internal object MediaSaver {
         return sb.append(if (isVideo) ".mp4" else ".jpg").toString()
     }
 
-    /** Request describing one file to save. */
     class Job(
         @JvmField val item: MediaItem,
         @JvmField val username: String?,
@@ -72,10 +70,6 @@ internal object MediaSaver {
         @JvmField val index: Int = -1,
     )
 
-    /**
-     * Downloads [jobs] in the background. Shows [startText] now and one summary toast at the end:
-     * [doneText] when everything succeeded, a partial / failure toast otherwise.
-     */
     fun saveAll(ctx: Context, jobs: List<Job>, startText: String, doneText: String) {
         if (jobs.isEmpty()) return
         toast(ctx, startText)
@@ -86,7 +80,7 @@ internal object MediaSaver {
             executor.submit {
                 try {
                     val fn = buildFilename(job.username, job.type, job.mediaId, job.item.isVideo, job.index)
-                    downloadAndSave(ctx, job.item.url, fn, job.item.isVideo, job.username)
+                    downloadItem(ctx, job.item, fn, job.username)
                 } catch (t: Throwable) {
                     failed.incrementAndGet()
                     lastError.set(t.message ?: t.javaClass.simpleName)
@@ -107,6 +101,75 @@ internal object MediaSaver {
     }
 
     @Throws(Exception::class)
+    private fun downloadItem(ctx: Context, item: MediaItem, filename: String, username: String?) {
+        val manifest = item.dashManifest
+        if (item.isVideo && manifest != null) {
+            val tracks = Dash.parse(manifest)
+            val video = Dash.bestVideo(tracks)
+            val audio = Dash.bestAudio(tracks)
+            val sharper = video != null && video.width + video.height > item.progressiveScore
+            if (sharper && (audio != null || !Dash.hasSound(tracks))) {
+                val saved = runCatching { saveDash(ctx, video!!, audio, filename, username) }
+                    .onFailure { ModuleLog.line("(NA|DL) DASH failed, saving the mp4: $it") }.isSuccess
+                if (saved) return
+            }
+        }
+        downloadAndSave(ctx, item.url, filename, item.isVideo, username)
+    }
+
+    private fun saveDash(ctx: Context, video: Dash.Track, audio: Dash.Track?, filename: String, username: String?) {
+        val v = File.createTempFile("ie_dl_v_", ".mp4", ctx.cacheDir)
+        val a = audio?.let { File.createTempFile("ie_dl_a_", ".mp4", ctx.cacheDir) }
+        val out = File.createTempFile("ie_dl_", ".mp4", ctx.cacheDir)
+        try {
+            downloadToFile(video.url, v)
+            a?.let { downloadToFile(audio.url, it) }
+            Dash.mux(listOfNotNull(v, a), out)
+            saveFileToDestination(ctx, out, filename, true, username)
+        } finally {
+            v.delete(); a?.delete(); out.delete()
+        }
+    }
+
+    @Throws(Exception::class)
+    fun saveAudio(ctx: Context, url: String, filename: String, username: String?, fromMs: Long = -1, lengthMs: Long = -1) {
+        val raw = File.createTempFile("ie_au_", ".bin", ctx.cacheDir)
+        val out = File.createTempFile("ie_au_", ".m4a", ctx.cacheDir)
+        try {
+            downloadToFile(url, raw)
+            val cut = runCatching {
+                if (fromMs >= 0 || lengthMs > 0) {
+                    val from = fromMs.coerceAtLeast(0) * 1000
+                    Dash.cut(raw, out, from, if (lengthMs > 0) from + lengthMs * 1000 else Long.MAX_VALUE)
+                } else {
+                    Dash.mux(listOf(raw), out)
+                }
+            }.onFailure { ModuleLog.line("(NA|DL) audio remux failed, saving whole file: $it") }.isSuccess
+            val (ext, mime) = if (cut) ".m4a" to "audio/mp4" else audioType(raw)
+            val name = filename.substringBeforeLast('.') + ext
+            FileInputStream(if (cut) out else raw).use { input ->
+                openOutputStream(ctx, name, mime, username).use { input.copyTo(it, 64 * 1024) }
+            }
+        } finally {
+            raw.delete(); out.delete()
+        }
+    }
+
+    private fun audioType(file: File): Pair<String, String> {
+        val head = ByteArray(12)
+        val n = FileInputStream(file).use { it.read(head) }
+        val text = if (n > 0) String(head, 0, n, Charsets.ISO_8859_1) else ""
+        return when {
+            text.length >= 8 && text.substring(4, 8) == "ftyp" -> ".m4a" to "audio/mp4"
+            text.startsWith("OggS") -> ".ogg" to "audio/ogg"
+            text.startsWith("ID3") || (n >= 2 && head[0] == 0xFF.toByte() && (head[1].toInt() and 0xE0) == 0xE0) -> ".mp3" to "audio/mpeg"
+            text.startsWith("RIFF") -> ".wav" to "audio/wav"
+            text.startsWith("#!AMR") -> ".amr" to "audio/amr"
+            else -> ".m4a" to "audio/mp4"
+        }
+    }
+
+    @Throws(Exception::class)
     fun downloadAndSave(ctx: Context, url: String, filename: String, isVideo: Boolean, username: String?) {
         val temp = File.createTempFile("ie_dl_", ".bin", ctx.cacheDir)
         try {
@@ -120,6 +183,28 @@ internal object MediaSaver {
                     " file=" + detected.filename
             )
             saveFileToDestination(ctx, temp, detected.filename ?: filename, detected.isVideo(), username)
+        } finally {
+            temp.delete()
+        }
+    }
+
+    @Throws(Exception::class)
+    fun saveAnimated(ctx: Context, url: String, baseName: String, username: String?) {
+        val temp = File.createTempFile("ie_dl_", ".bin", ctx.cacheDir)
+        try {
+            downloadToFile(url, temp)
+            val head = ByteArray(12)
+            val n = FileInputStream(temp).use { it.read(head) }
+            val text = if (n > 0) String(head, 0, n, Charsets.ISO_8859_1) else ""
+            val (ext, mime) = when {
+                text.startsWith("GIF8") -> ".gif" to "image/gif"
+                text.startsWith("RIFF") && text.length >= 12 && text.substring(8, 12) == "WEBP" -> ".webp" to "image/webp"
+                text.length >= 8 && text.substring(4, 8) == "ftyp" -> ".mp4" to "video/mp4"
+                else -> ".jpg" to "image/jpeg"
+            }
+            FileInputStream(temp).use { input ->
+                openOutputStream(ctx, baseName + ext, mime, username).use { out -> input.copyTo(out, 64 * 1024) }
+            }
         } finally {
             temp.delete()
         }
@@ -148,13 +233,12 @@ internal object MediaSaver {
     @Throws(Exception::class)
     fun saveFileToDestination(ctx: Context, tempFile: File, filename: String, isVideo: Boolean, username: String?) {
         FileInputStream(tempFile).use { input ->
-            openOutputStream(ctx, filename, isVideo, username).use { out -> input.copyTo(out, 64 * 1024) }
+            openOutputStream(ctx, filename, if (isVideo) "video/mp4" else "image/jpeg", username).use { out -> input.copyTo(out, 64 * 1024) }
         }
     }
 
     @Throws(Exception::class)
-    private fun openOutputStream(ctx: Context, filename: String, isVideo: Boolean, username: String?): OutputStream {
-        val mimeType = if (isVideo) "video/mp4" else "image/jpeg"
+    private fun openOutputStream(ctx: Context, filename: String, mimeType: String, username: String?): OutputStream {
 
         if (FeatureFlags.downloaderCustomPath.isNotEmpty()) {
             try {
@@ -229,7 +313,6 @@ internal object MediaSaver {
         return true
     }
 
-    /** URL-only guess, used only where the model did not say what the file is. */
     fun looksLikeVideoUrl(url: String?): Boolean {
         if (url == null) return false
         val lower = url.lowercase(Locale.US)

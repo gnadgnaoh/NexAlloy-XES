@@ -8,7 +8,6 @@ import org.luckypray.dexkit.result.ClassData
 import org.luckypray.dexkit.result.MethodData
 import java.lang.reflect.Modifier
 
-// Class names that are not obfuscated (verified on Instagram 451).
 internal const val MEDIA_CLASS = "com.instagram.feed.media.Media"
 internal const val MEDIA_EXT_CLASS = "com.instagram.feed.media.MediaExtKt"
 internal const val USER_CLASS = "com.instagram.user.model.User"
@@ -28,11 +27,6 @@ private const val DISMISS_LISTENER = "android.content.DialogInterface\$OnDismiss
 private const val BITMAP = "android.graphics.Bitmap"
 private const val FUNCTION1 = "kotlin.jvm.functions.Function1"
 
-/*
- * Every list fingerprint starts with Media.<init>. DexKit's cache treats an empty list as
- * "not resolved yet" and would rescan on every launch, so the anchor keeps the cached list
- * non-empty. Consumers drop it with [isAnchor].
- */
 private fun DexKitBridge.alwaysMatches(): List<MethodData> =
     findMethod {
         matcher {
@@ -51,9 +45,6 @@ private fun DexKitBridge.userClassName(): String =
     findMethod { matcher { usingStrings("username_missing_during_update") } }
         .firstOrNull()?.declaredClassName ?: USER_CLASS
 
-// region Media model
-
-/** `VideoUrlImpl(VideoUrlImpl, Long, String url, String, int, int, int)`; throws on a null url. */
 val videoUrlConstructorFingerprint = findMethodDirect {
     findMethod {
         matcher {
@@ -63,7 +54,6 @@ val videoUrlConstructorFingerprint = findMethodDirect {
     }.single()
 }
 
-/** `Media.video_versions` getter: `List<VideoUrlImpl>`. */
 val videoVersionsGetterMethods = findMethodListDirect {
     alwaysMatches() + findMethod {
         matcher {
@@ -74,7 +64,6 @@ val videoVersionsGetterMethods = findMethodListDirect {
     }
 }
 
-/** `Media.carousel_media` getter: `List<Media>`. */
 val carouselMediaGetterMethods = findMethodListDirect {
     alwaysMatches() + findMethod {
         matcher {
@@ -85,7 +74,6 @@ val carouselMediaGetterMethods = findMethodListDirect {
     }
 }
 
-/** The boolean Media getter logged right before the `is_video` key in an analytics event. */
 val isVideoMethods = findMethodListDirect {
     alwaysMatches() + findMethod {
         matcher {
@@ -110,10 +98,6 @@ val isVideoMethods = findMethodListDirect {
     }.distinctBy { it.descriptor }
 }
 
-/**
- * `ImageInfo` (image_versions2) of a Media. The static MediaExtKt accessor comes first because
- * it resolves the live Pando tree; the Media instance getters are fallbacks.
- */
 val mediaImageInfoGetterMethods = findMethodListDirect {
     val static = findMethod {
         matcher {
@@ -131,10 +115,6 @@ val mediaImageInfoGetterMethods = findMethodListDirect {
     alwaysMatches() + (static + instance).distinctBy { it.descriptor }
 }
 
-/**
- * Screen-sized image of a Media: `MediaExtKt.X(Context, Media)`. Returns an ExtendedImageUrl on
- * 451, a String on older builds; both shapes are accepted.
- */
 val mediaScreenImageMethods = findMethodListDirect {
     alwaysMatches() + listOf(EXTENDED_IMAGE_URL_CLASS, STRING).flatMap { ret ->
         findMethod {
@@ -153,7 +133,6 @@ val userClassAnchorMethods = findMethodListDirect {
     }
 }
 
-/** `User.getUsername()`: reads key hash -265713450; the full_name reader is sorted last. */
 val userUsernameGetterMethods = findMethodListDirect {
     val userClassName = userClassName()
     val readsFullName = findMethod {
@@ -175,7 +154,6 @@ val userUsernameGetterMethods = findMethodListDirect {
     }.sortedBy { it.descriptor in readsFullName }
 }
 
-/** `Media.getUser()` (owner): key hash 3599307 ("user"). */
 val mediaAuthorGetterMethods = findMethodListDirect {
     val userClassName = userClassName()
     alwaysMatches() + findMethod {
@@ -188,11 +166,6 @@ val mediaAuthorGetterMethods = findMethodListDirect {
     }
 }
 
-// endregion
-
-// region Post / reel overflow menus
-
-/** `static void addRow(ButtonType, Option, Creator, CharSequence, ArrayList, boolean)`. */
 val postMenuCreatorVoidMethods = findMethodListDirect {
     val anchor = alwaysMatches()
     val creator = findClass {
@@ -207,10 +180,6 @@ val postMenuCreatorVoidMethods = findMethodListDirect {
     }
 }
 
-/**
- * Option dispatchers `void X(MediaOption.Option)`: MediaOptionsOverflowHelper (feed posts) and
- * ClipsOrganicMoreOptionsHelper (reels). The surface is told apart at runtime.
- */
 val postOptionClickMethods = findMethodListDirect {
     alwaysMatches() + findMethod {
         matcher {
@@ -220,7 +189,6 @@ val postOptionClickMethods = findMethodListDirect {
     }
 }
 
-/** Post menu allow-list `List<Option> (boolean)`. */
 val postMenuAllowlistMethods = findMethodListDirect {
     val option = "L${MEDIA_OPTION_CLASS.replace('.', '/')};"
     alwaysMatches() + findMethod {
@@ -234,7 +202,6 @@ val postMenuAllowlistMethods = findMethodListDirect {
     }
 }
 
-/** Reel overflow option list `ArrayList<Option> (…, Media)`. */
 val reelOptionsListBuilderMethods = findMethodListDirect {
     val option = "L${MEDIA_OPTION_CLASS.replace('.', '/')};"
     alwaysMatches() + findMethod {
@@ -246,23 +213,13 @@ val reelOptionsListBuilderMethods = findMethodListDirect {
     }
 }
 
-// endregion
-
-// region Story overflow menu
-
 private const val STORY_OPTIONS_ANCHOR = "[INTERNAL] Pause Playback"
 
-/**
- * The class that builds the story overflow menu (redex name "ReelOptionsOverflowHelper").
- * Since 451 the debug labels live in a private `void (List)` helper, so the label builders no
- * longer reference the anchor string themselves; we anchor on the class instead.
- */
 private fun DexKitBridge.storyOptionsOwners(): List<ClassData> =
     findMethod { matcher { usingStrings(STORY_OPTIONS_ANCHOR) } }
         .mapNotNull { it.declaredClass }
         .distinctBy { it.name }
 
-/** CharSequence[] / ArrayList builders of menu labels inside the owner class. */
 val storyOptionBuilderMethods = findMethodListDirect {
     alwaysMatches() + storyOptionsOwners().flatMap { owner ->
         owner.methods.filter { m ->
@@ -277,10 +234,6 @@ val storyOptionBuilderMethods = findMethodListDirect {
     }.distinctBy { it.descriptor }
 }
 
-/**
- * Click dispatchers: `static void X(OnDismissListener, …, CharSequence label)`.
- * Plus the legacy match (void methods referencing the anchor string) for older builds.
- */
 val storyOptionClickMethods = findMethodListDirect {
     val byShape = storyOptionsOwners().flatMap { owner ->
         owner.methods.filter { m ->
@@ -298,10 +251,6 @@ val storyOptionClickMethods = findMethodListDirect {
     alwaysMatches() + (byShape + legacy).distinctBy { it.descriptor }
 }
 
-/**
- * Label → icon mapper of the story "About this story" sheet: `static int X(Helper, CharSequence)`.
- * It returns 0 for labels it does not know, which is why our row had no icon.
- */
 val storyOptionIconMethods = findMethodListDirect {
     alwaysMatches() + storyOptionsOwners().flatMap { owner ->
         owner.methods.filter { m ->
@@ -311,15 +260,6 @@ val storyOptionIconMethods = findMethodListDirect {
     }
 }
 
-// endregion
-
-// region Instants (QuickSnap)
-
-/**
- * Constructors of the viewer-screen Compose lambdas that receive the instant being shown.
- * The lambda index (`…$16$1$8$1`, `…$16$1$11$1`, …) shifts every release, so we match on shape:
- * a constructor taking a model that holds a Media field.
- */
 val instantViewerConstructors = findMethodListDirect {
     val holdsMedia = HashMap<String, Boolean>()
     fun DexKitBridge.typeHoldsMedia(type: String): Boolean = holdsMedia.getOrPut(type) {
@@ -339,7 +279,6 @@ val instantViewerConstructors = findMethodListDirect {
         }
 }
 
-/** Constructors of the tap / long-press gesture lambdas (they hold Function1 callbacks). */
 val instantLongPressConstructors = findMethodListDirect {
     alwaysMatches() + findClass { searchPackages(QUICKSNAP_VIEWER_PACKAGE) }
         .filter { it.name.contains("handleTapAndLongPress") }
@@ -347,7 +286,6 @@ val instantLongPressConstructors = findMethodListDirect {
         .flatMap { c -> c.methods.filter { it.isConstructor } }
 }
 
-/** Capture → upload suspend functions: `static Object X(Context, Bitmap, …)` on the camera VM. */
 val instantCaptureMethods = findMethodListDirect {
     val vm = classNamed(QUICKSNAP_VM_CLASS) ?: return@findMethodListDirect alwaysMatches()
     alwaysMatches() + vm.methods.filter { m ->
@@ -357,4 +295,40 @@ val instantCaptureMethods = findMethodListDirect {
     }
 }
 
-// endregion
+private const val PANDO_MUSIC_INFO = "com.instagram.api.schemas.ImmutablePandoMusicInfo"
+private const val TRACK_DATA = "com.instagram.api.schemas.TrackData"
+private const val PANDO_TRACK_DATA = "com.instagram.api.schemas.ImmutablePandoTrackData"
+private const val MUSIC_CONSUMPTION = "com.instagram.music.common.model.MusicConsumptionModel"
+private const val PANDO_MUSIC_CONSUMPTION = "com.instagram.music.common.model.ImmutablePandoMusicConsumptionModel"
+
+private fun DexKitBridge.pandoGetter(type: String, field: String, returns: String?): MethodData =
+    findMethod {
+        matcher {
+            declaredClass(type)
+            paramCount = 0
+            if (returns != null) returnType = returns
+            usingNumbers(field.hashCode())
+        }
+    }.single { !Modifier.isStatic(it.modifiers) && '.' in it.returnTypeName } // getter object, bỏ hàm "có field không" kiểu boolean
+
+val mediaDashManifestGetterFingerprint = findMethodDirect { pandoGetter(MEDIA_CLASS, "video_dash_manifest", STRING) }
+val mediaMusicMetadataGetterFingerprint = findMethodDirect { pandoGetter(MEDIA_CLASS, "music_metadata", null) }
+val mediaClipsMetadataGetterFingerprint = findMethodDirect { pandoGetter(MEDIA_CLASS, "clips_metadata", null) }
+val musicTrackGetterFingerprint = findMethodDirect { pandoGetter(PANDO_MUSIC_INFO, "music_asset_info", TRACK_DATA) }
+val musicConsumptionGetterFingerprint = findMethodDirect { pandoGetter(PANDO_MUSIC_INFO, "music_consumption_info", MUSIC_CONSUMPTION) }
+val trackUrlGetterFingerprint = findMethodDirect { pandoGetter(PANDO_TRACK_DATA, "progressive_download_url", STRING) }
+val musicStartGetterFingerprint = findMethodDirect { pandoGetter(PANDO_MUSIC_CONSUMPTION, "audio_asset_start_time_in_ms", "java.lang.Integer") }
+val musicLengthGetterFingerprint = findMethodDirect { pandoGetter(PANDO_MUSIC_CONSUMPTION, "overlap_duration_in_ms", "java.lang.Integer") }
+
+val reelMenuRowAdderFingerprint = findMethodDirect {
+    findMethod {
+        matcher {
+            returnType = "void"
+            usingStrings(listOf("ClipsOrganicMoreOptionsHelper_addBottomSheetRowItem"), StringMatchType.Contains)
+        }
+    }.single { m ->
+        val p = m.paramTypeNames
+        !Modifier.isStatic(m.modifiers) && p.size == 6 && p[0] == CONTEXT && p[1] == MEDIA_OPTION_CLASS &&
+            p[4] == "java.lang.Integer" && p[5] == STRING
+    }
+}

@@ -2,28 +2,25 @@ package io.github.nexalloy.revanced.instagram.download
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.view.View
+import android.widget.PopupMenu
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import io.github.nexalloy.R
 import io.github.nexalloy.findClassOrNull
+import io.github.nexalloy.revanced.instagram.profile.ProfileHeader
 import java.lang.reflect.Field
 import java.lang.reflect.Modifier
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Long-press the enlarged profile picture (view id `expanded_profile_pic`) to save it.
- * The image view holds one or more ImageUrl fields; the largest one wins.
- *
- * Only `IgImageView.onAttachedToWindow` is hooked (CircularImageView and the other image views
- * extend it), not `View.onAttachedToWindow` for every view in the app. The check per call is a
- * single int comparison.
- */
 internal object ProfilePicDownloadHook {
 
     private const val IG_IMAGE_VIEW = "com.instagram.common.ui.widget.imageview.IgImageView"
@@ -34,7 +31,6 @@ internal object ProfilePicDownloadHook {
     @Volatile
     private var viewIdResolved = false
 
-    /** Views that already carry our listener; weak so recycled screens are released. */
     private val attached: MutableSet<View> = Collections.newSetFromMap(WeakHashMap())
 
     private val onAttached = object : XC_MethodHook() {
@@ -51,14 +47,12 @@ internal object ProfilePicDownloadHook {
     }
 
     fun install(cl: ClassLoader) {
-        // Dò, không dùng runCatching: không có IgImageView.onAttachedToWindow thì dùng View (dự phòng có chủ đích).
         val target = IG_IMAGE_VIEW.findClassOrNull(cl)?.declaredMethods
             ?.firstOrNull { it.name == "onAttachedToWindow" && it.parameterCount == 0 }
         if (target != null) {
             XposedBridge.hookMethod(target, onAttached)
             ModuleLog.line("(NA|Profile) hooked IgImageView.onAttachedToWindow")
         } else {
-            // Fallback for builds where IgImageView no longer overrides it.
             XposedHelpers.findAndHookMethod(View::class.java, "onAttachedToWindow", onAttached)
             ModuleLog.line("(NA|Profile) IgImageView hook unavailable; using View.onAttachedToWindow")
         }
@@ -79,21 +73,47 @@ internal object ProfilePicDownloadHook {
 
     private fun attach(view: View) {
         view.setOnLongClickListener { v ->
-            val ctx = v.context
-            val url = extractUrl(v)
-            if (url == null) {
-                MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_toast_profile_pic_url_not_found))
-                return@setOnLongClickListener true
-            }
-            val username = CarouselIndex.activityOf(ctx)?.let { usernameFromScreen(it) }
-            DownloadUi.saveOne(ctx, MediaItem(url, false), MediaKind.PROFILE, username, null)
+            runCatching { showMenu(v) }.onFailure { ModuleLog.line("(NA|Profile) menu failed: $it") }
             true
         }
     }
 
+    private fun showMenu(v: View) {
+        val ctx = v.context
+        val user = ProfileHeader.lastUser
+        val username = user?.let { UserUtils.callUsernameGetter(it) }
+            ?: CarouselIndex.activityOf(ctx)?.let { usernameFromScreen(it) }
+        val bio = user?.let { u -> runCatching { ProfileHeader.biographyGetter?.invoke(u) as? String }.getOrNull() }
+        val url = fullSizeUrl(user) ?: extractUrl(v)
+        val menu = PopupMenu(ctx, v)
+        val items = listOfNotNull(
+            url?.let { I18n.t(ctx, R.string.ig_profile_pic_view) to { ProfilePictureViewer.show(ctx, it) } },
+            url?.let { I18n.t(ctx, R.string.ig_profile_pic_download) to { DownloadUi.saveOne(ctx, MediaItem(it, false), MediaKind.PROFILE, username, null) } },
+            username?.takeIf { it.isNotEmpty() }?.let { I18n.t(ctx, R.string.ig_copy_username) to { copy(ctx, it) } },
+            bio?.takeIf { it.isNotBlank() }?.let { I18n.t(ctx, R.string.ig_copy_bio) to { copy(ctx, it) } },
+        )
+        if (items.isEmpty()) {
+            MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_toast_profile_pic_url_not_found))
+            return
+        }
+        items.forEachIndexed { i, (title, _) -> menu.menu.add(0, i, i, title) }
+        menu.setOnMenuItemClickListener { item -> items.getOrNull(item.itemId)?.second?.invoke(); true }
+        menu.show()
+    }
+
+    private fun fullSizeUrl(user: Any?): String? {
+        val info = user?.let { runCatching { ProfileHeader.hdPictureGetter?.invoke(it) }.getOrNull() } ?: return null
+        return runCatching { info.javaClass.getMethod("getUrl").invoke(info) as? String }.getOrNull()?.takeIf { it.startsWith("http") }
+    }
+
+    private fun copy(ctx: Context, text: String) {
+        val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Instagram", text))
+        MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_copied))
+    }
+
     private val imageFieldCache = ConcurrentHashMap<Class<*>, List<Field>>()
 
-    /** Fields typed as an image url (ImageUrl / ExtendedImageUrl / …) on the view's classes. */
     private fun imageFields(cls: Class<*>): List<Field> = imageFieldCache.getOrPut(cls) {
         val imageUrl = MediaResolver.imageUrlType
         val out = ArrayList<Field>()

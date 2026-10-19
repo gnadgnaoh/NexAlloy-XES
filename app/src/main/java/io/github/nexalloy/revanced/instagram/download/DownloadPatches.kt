@@ -6,18 +6,16 @@ import io.github.nexalloy.Patch
 import io.github.nexalloy.PatchExecutor
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
+import io.github.nexalloy.revanced.instagram.profile.ProfileHeaderHook
 import java.lang.reflect.Member
 import java.lang.reflect.Method
 import kotlin.reflect.KProperty0
 
-// isMethod excludes both <init> and <clinit>: a static initializer can match a string/number
-// query but is not reachable through reflection, so toMethod() would throw.
 private fun PatchExecutor.methodsOf(fingerprint: KProperty0<FindMethodListFunc>): List<Method> =
     fingerprint.dexMethodList
         .filter { it.isMethod }
         .map { it.toMethod() }
 
-/** Declaring class of the first real match (falls back to <clinit>/<init> owners). */
 private fun PatchExecutor.declaringClassOf(fingerprint: KProperty0<FindMethodListFunc>): Class<*>? =
     fingerprint.dexMethodList
         .filterNot { isAnchor(it.declaredClassName, it.isConstructor) }
@@ -30,7 +28,6 @@ private fun PatchExecutor.constructorsOf(fingerprint: KProperty0<FindMethodListF
         .filter { it.isConstructor && !isAnchor(it.declaredClassName, true) }
         .map { it.toConstructor() }
 
-/** Binds the media model (URLs, author, carousel) shared by every download patch. */
 val MediaDownloadCore = patch(name = "<MediaDownloadCore>") {
     MediaResolver.bindClasses(classLoader)
     MediaResolver.bindVideoVersionsGetters(methodsOf(::videoVersionsGetterMethods))
@@ -45,22 +42,30 @@ val MediaDownloadCore = patch(name = "<MediaDownloadCore>") {
     }
     MediaResolver.bindAuthorGetter(methodsOf(::mediaAuthorGetterMethods).firstOrNull())
 
-    // The url field of VideoUrlImpl is found by constructing a probe instance; no hook needed.
     val ctor = ::videoUrlConstructorFingerprint.constructor
     val urlArg = VideoUrlProbe.urlArgIndex(ctor)
     MediaResolver.bindVideoUrlModel(ctor.declaringClass, VideoUrlProbe.urlField(ctor, urlArg))
 
+    runCatching { MediaResolver.bindDashManifestGetter(::mediaDashManifestGetterFingerprint.method) }
+        .onFailure { Logger.printInfo { "MediaDownloadCore: no DASH manifest getter: ${it.message}" } }
+    runCatching {
+        AudioSource.bind(
+            classLoader,
+            listOf(::mediaMusicMetadataGetterFingerprint.method, ::mediaClipsMetadataGetterFingerprint.method),
+            ::musicTrackGetterFingerprint.method, ::musicConsumptionGetterFingerprint.method,
+            ::trackUrlGetterFingerprint.method, ::musicStartGetterFingerprint.method, ::musicLengthGetterFingerprint.method,
+        )
+    }.onFailure { Logger.printInfo { "MediaDownloadCore: no music model getters: ${it.message}" } }
+
     Logger.printInfo { "MediaDownloadCore: ${MediaResolver.describe()}" }
 }
 
-/** Download / Copy link in the post and reel overflow menus (shared by both). */
 val MediaOptionsIntegration = patch(name = "<MediaOptionsIntegration>") {
     dependsOn(MediaDownloadCore)
     check(MediaOptionsHook.loadOptionEnum(classLoader)) {
         "MediaOptionsIntegration: MediaOption enum has neither DOWNLOAD nor COPY_LINK"
     }
 
-    // Feed post menu: an extra row once per menu, and the allow-list that filters rows.
     (MediaOptionsHook.selectAddRowMethod(methodsOf(::postMenuCreatorVoidMethods))
         ?: error("post menu add-row method not found")).hookMethod {
         before { MediaOptionsHook.beforeAddRow(it) }
@@ -70,12 +75,15 @@ val MediaOptionsIntegration = patch(name = "<MediaOptionsIntegration>") {
         after { MediaOptionsHook.onAllowlistBuilt(it) }
     }
 
-    // Reel menu: the option list.
+    runCatching { ::reelMenuRowAdderFingerprint.method }.getOrNull()?.let { adder ->
+        MediaOptionsHook.bindReelRowAdder(adder)
+        adder.hookMethod { after { MediaOptionsHook.afterReelRowAdded(it) } }
+    }
+
     methodsOf(::reelOptionsListBuilderMethods).forEach { builder ->
         builder.hookMethod { after { MediaOptionsHook.onReelOptionsBuilt(it) } }
     }
 
-    // Both menus dispatch through `void X(Option)`.
     MediaOptionsHook.selectDispatchers(methodsOf(::postOptionClickMethods)).forEach { dispatcher ->
         dispatcher.hookMethod { before { MediaOptionsHook.onOptionSelected(it) } }
     }
@@ -114,7 +122,6 @@ val StoryDownload: Patch = patch(
         .filter { it.parameterCount > 0 }
         .forEach { it.hookMethod { before { param -> StoryDownloadHook.onStoryOptionClick(param) } } }
 
-    // Same download arrow as the post / reel menus.
     StoryDownloadHook.resolveDownloadIcon(classLoader)
     methodsOf(::storyOptionIconMethods).forEach {
         it.hookMethod { after { param -> StoryDownloadHook.onIconResolved(param) } }
@@ -123,10 +130,11 @@ val StoryDownload: Patch = patch(
 
 val ProfilePictureDownload: Patch = patch(
     name = "Download profile pictures",
-    description = "Adds a Download entry when a profile picture is opened, saving the " +
-        "full-resolution image rather than the cropped thumbnail.",
+    description = "Long-press an opened profile picture to view it full size, download it, or copy the " +
+        "username or bio.",
 ) {
     dependsOn(MediaDownloadCore)
+    runCatching { dependsOn(ProfileHeaderHook) }.onFailure { Logger.printInfo { "ProfilePictureDownload: no profile header: ${it.message}" } }
     FeatureFlags.enableProfileDownload = true
     ProfilePicDownloadHook.install(classLoader)
 }

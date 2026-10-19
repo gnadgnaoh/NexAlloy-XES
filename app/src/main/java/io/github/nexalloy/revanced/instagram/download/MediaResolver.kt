@@ -8,20 +8,14 @@ import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentHashMap
 
-/** One downloadable file. */
 internal class MediaItem(
     @JvmField val url: String,
     @JvmField val isVideo: Boolean,
+    // Theo HushGram: manifest DASH của video (bản nét nhất player phát) và điểm (rộng + cao) của file mp4 tốt nhất để so.
+    @JvmField val dashManifest: String? = null,
+    @JvmField val progressiveScore: Long = 0,
 )
 
-/**
- * Resolves URLs, author and id from an Instagram `Media`.
- *
- * Everything goes through getters bound once from DexKit fingerprints (video_versions,
- * carousel_media, image_versions2, author). The reflective field scan is only a last resort,
- * reads fields (never invokes arbitrary getters, which on 451's Pando models can hit JNI) and
- * is depth-limited. Callers should run resolution off the main thread.
- */
 internal object MediaResolver {
 
     private var mediaClass: Class<*>? = null
@@ -36,12 +30,11 @@ internal object MediaResolver {
     private val imageInfoGetters = ArrayList<Method>()
     private val screenImageGetters = ArrayList<Method>()
     private var authorGetter: Method? = null
+    private var dashManifestGetter: Method? = null
 
     private var videoUrlClass: Class<*>? = null
     private var videoUrlField: Field? = null
     private var videoUrlIntFields: List<Field> = emptyList()
-
-    // region binding
 
     fun bindClasses(classLoader: ClassLoader) {
         mediaClass = load(classLoader, MEDIA_CLASS)
@@ -49,6 +42,16 @@ internal object MediaResolver {
         imageUrlClass = load(classLoader, IMAGE_URL_CLASS)
         extendedImageUrlClass = load(classLoader, EXTENDED_IMAGE_URL_CLASS)
         if (videoUrlClass == null) videoUrlClass = load(classLoader, VIDEO_URL_CLASS)
+    }
+
+    fun bindDashManifestGetter(method: Method?) {
+        dashManifestGetter = method?.apply { isAccessible = true }
+    }
+
+    fun dashManifest(media: Any?): String? {
+        val g = dashManifestGetter ?: return null
+        if (media == null || !g.declaringClass.isInstance(media)) return null
+        return runCatching { g.invoke(media) as? String }.getOrNull()?.takeIf { it.contains("<MPD") }
     }
 
     fun bindVideoUrlModel(modelClass: Class<*>, urlField: Field) {
@@ -116,10 +119,6 @@ internal object MediaResolver {
             "screenImage=${screenImageGetters.size} author=${authorGetter?.name} " +
             "videoUrlField=${videoUrlField?.name}"
 
-    // endregion
-
-    // region public API
-
     fun isMedia(obj: Any?): Boolean = obj != null && mediaClass?.isInstance(obj) == true
 
     fun isReelItem(obj: Any?): Boolean = obj != null && reelItemClass?.isInstance(obj) == true
@@ -130,7 +129,6 @@ internal object MediaResolver {
 
     val imageUrlType: Class<*>? get() = imageUrlClass
 
-    /** Every slide of a carousel, or the single item of a plain post. */
     fun items(ctx: Context?, media: Any?): List<MediaItem> {
         if (media == null) return emptyList()
         val children = carouselChildren(media)
@@ -142,11 +140,10 @@ internal object MediaResolver {
         return listOfNotNull(single(ctx, media))
     }
 
-    /** The video if the media is a video, else its largest image. */
     fun single(ctx: Context?, media: Any?): MediaItem? {
         if (media == null) return null
         val video = videoUrl(media)
-        if (video != null) return MediaItem(video, true)
+        if (video != null) return MediaItem(video, true, dashManifest(media), bestVideoScore(media))
         if (isVideo(media)) {
             ModuleLog.line("(NA|Media) video without a resolvable URL; not falling back to cover")
             return null
@@ -160,7 +157,6 @@ internal object MediaResolver {
         return runCatching { m.invoke(media) == true }.getOrDefault(false)
     }
 
-    /** Highest-resolution entry of `video_versions`. */
     fun videoUrl(media: Any?): String? {
         if (media == null) return null
         for (getter in videoVersionsGetters) {
@@ -173,7 +169,6 @@ internal object MediaResolver {
         return scanForVideoUrl(media)
     }
 
-    /** Largest candidate of `image_versions2`, then the screen-sized url, then a field scan. */
     fun imageUrl(ctx: Context?, media: Any?): String? {
         if (media == null) return null
         var best: Candidate? = null
@@ -217,14 +212,12 @@ internal object MediaResolver {
             null
         }
 
-    /** `Media.getId()` is "<pk>_<owner>"; keep the pk. */
     fun mediaId(media: Any?): String? {
         if (media == null) return null
         val id = runCatching { media.javaClass.getMethod("getId").invoke(media) }.getOrNull()
         return (id as? String)?.takeIf { it.isNotEmpty() }?.substringBefore('_')
     }
 
-    /** Media held by a ReelItem (story frame). */
     fun mediaOfReelItem(reelItem: Any?): Any? {
         if (reelItem == null) return null
         for (m in getterCache(reelItem.javaClass, mediaClass)) {
@@ -243,7 +236,6 @@ internal object MediaResolver {
         return null
     }
 
-    /** First non-null field of exactly [type] on [obj] or its superclasses. */
     fun fieldOfType(obj: Any?, type: Class<*>?): Any? {
         if (obj == null || type == null) return null
         for (f in fieldsOf(obj.javaClass)) {
@@ -254,7 +246,6 @@ internal object MediaResolver {
         return null
     }
 
-    /** Breadth-first search for a Media through app model fields, at most [maxDepth] hops. */
     fun findMedia(root: Any?, maxDepth: Int = 2): Any? {
         if (root == null) return null
         if (isMedia(root)) return root
@@ -276,10 +267,6 @@ internal object MediaResolver {
         return null
     }
 
-    // endregion
-
-    // region internals
-
     private class Candidate(@JvmField val url: String, @JvmField val area: Long)
 
     private fun maxOf(a: Candidate?, b: Candidate?): Candidate? = when {
@@ -288,6 +275,12 @@ internal object MediaResolver {
         b.area > a.area -> b
         else -> a
     }
+
+    private fun bestVideoScore(media: Any): Long = videoVersionsGetters
+        .filter { it.declaringClass.isInstance(media) }
+        .mapNotNull { runCatching { it.invoke(media) as? List<*> }.getOrNull() }
+        .flatMap { list -> list.filterNotNull().map { videoScore(it) } }
+        .maxOrNull() ?: 0
 
     private fun bestVideoVersion(list: List<*>): String? {
         var bestUrl: String? = null
@@ -313,7 +306,6 @@ internal object MediaResolver {
         return stringFieldUrl(item)
     }
 
-    /** width + height; the small type code (101..103) is ignored. */
     private fun videoScore(item: Any): Long {
         val fields = if (videoUrlClass?.isInstance(item) == true) videoUrlIntFields else emptyList()
         var score = 0L
@@ -341,7 +333,6 @@ internal object MediaResolver {
         return best
     }
 
-    /** getUrl / getWidth / getHeight of an image-url model, looked up once per class. */
     private class ImageAccessors(val url: Method, val width: Method?, val height: Method?)
 
     private val imageAccessorCache = ConcurrentHashMap<Class<*>, Any>()
@@ -379,7 +370,6 @@ internal object MediaResolver {
         return runCatching { acc.url.invoke(obj) as? String }.getOrNull()
     }
 
-    /** Width × height of an image-url model, 0 when unknown. */
     fun imageAreaOf(obj: Any?): Long {
         val acc = obj?.let { imageAccessors(it.javaClass) } ?: return 0
         val w = runCatching { acc.width?.invoke(obj) as? Int }.getOrNull() ?: 0
@@ -387,7 +377,6 @@ internal object MediaResolver {
         return w.toLong() * h.toLong()
     }
 
-    /** Video fallback: VideoUrl objects reachable through fields, depth 2. */
     private fun scanForVideoUrl(media: Any): String? {
         val type = videoUrlClass ?: return null
         val found = ArrayList<Any>()
@@ -399,7 +388,6 @@ internal object MediaResolver {
         return bestVideoVersion(found)
     }
 
-    /** Image fallback: ImageUrl objects reachable through fields, depth 1. */
     private fun scanForImage(media: Any): Candidate? {
         var best: Candidate? = null
         walkFields(media, 1) { v ->
@@ -470,10 +458,6 @@ internal object MediaResolver {
 
     private val getterCache = ConcurrentHashMap<String, List<Method>>()
 
-    /**
-     * Public no-arg getters of [cls] returning [type] (or, when [type] is null, returning a List
-     * or an app model). Only used on small model classes (ReelItem, ImageInfo).
-     */
     private fun getterCache(cls: Class<*>, type: Class<*>?): List<Method> =
         getterCache.getOrPut(cls.name + '|' + (type?.name ?: "*")) {
             cls.methods.filter { m ->
@@ -491,6 +475,4 @@ internal object MediaResolver {
 
     private fun load(cl: ClassLoader, name: String): Class<*>? =
         runCatching { cl.loadClass(name) }.getOrNull()
-
-    // endregion
 }
