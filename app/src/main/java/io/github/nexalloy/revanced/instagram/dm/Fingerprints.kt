@@ -3,7 +3,9 @@ package io.github.nexalloy.revanced.instagram.dm
 import app.morphe.extension.shared.Logger
 import io.github.nexalloy.morphe.Opcode
 import io.github.nexalloy.morphe.findFieldDirect
+import io.github.nexalloy.morphe.findFieldListDirect
 import io.github.nexalloy.morphe.findMethodDirect
+import io.github.nexalloy.morphe.findMethodListDirect
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -301,4 +303,102 @@ internal val messageTableGetterMethod = findMethodDirect {
             returnType = table
         }
     }.single { java.lang.reflect.Modifier.isStatic(it.modifiers) }
+}
+
+// ---- Theo HushGram (Show when someone was last active), kiểm tra trên 451 ----
+
+private const val OP_IGET_WIDE = 0x53
+private const val OP_SGET_WIDE = 0x61
+
+// Hàm tạo chữ presence: (Resources, List)String, nạp 2 hằng số Redex không đổi tên được:
+// 480 phút (đếm giờ tới 8 tiếng) và 10080 phút (quá 1 tuần thì không hiện gì).
+internal val presenceTextMethod = findMethodDirect {
+    findMethod {
+        matcher {
+            paramTypes("android.content.res.Resources", "java.util.List")
+            returnType = STRING
+            usingNumbers(480, 10080)
+        }
+    }.single { !it.isStaticMethod() }
+}
+
+// Field thời điểm hoạt động cuối (ms): iget-wide đầu tiên trên item của danh sách.
+internal val presenceLastActiveField = findFieldDirect {
+    presenceTextMethod().instructions.first { it.opcode == OP_IGET_WIDE }.fieldRef!!
+}
+
+// Kiểm tra "Đang hoạt động": static (item, long)boolean gọi ngay sau khi đọc thời điểm.
+internal val presenceActiveCheckMethod = findMethodDirect {
+    val item = presenceLastActiveField().declaredClassName
+    presenceTextMethod().instructions.mapNotNull { it.methodRef }.first {
+        it.isStaticMethod() && it.returnTypeName == "boolean" && it.paramTypeNames == listOf(item, "long")
+    }
+}
+
+// Khoảng thời gian vẫn tính là "Đang hoạt động": sget-wide đầu tiên trong hàm.
+internal val presenceActiveWindowField = findFieldDirect {
+    presenceTextMethod().instructions.first { it.opcode == OP_SGET_WIDE }.fieldRef!!
+}
+
+// ---- Theo HushGram (Download voice messages), kiểm tra trên 451 ----
+
+private const val OP_IGET_BOOLEAN = 0x55
+private const val OP_SGET_OBJECT = 0x62
+private val OP_IF_ZERO = setOf(0x38, 0x39) // if-eqz, if-nez
+
+// Hàm dựng menu nhấn giữ tin nhắn: mang chuỗi trace này.
+private fun DexKitBridge.messageActionMenu(): MethodData =
+    findMethod { matcher { usingEqStrings("DirectThreadFragment.showMessageActionDialog") } }.single()
+
+/**
+ * Mỗi hành động của menu là một singleton, được thêm khi một boolean của model menu đúng.
+ * Trả từng cặp [boolean của model, field singleton của hành động]; patch gọi toString() của singleton
+ * lúc chạy để chọn hành động Lưu ("SaveMedia") — tên này có bản lấy qua pool chuỗi của Redex nên không so ở đây.
+ */
+internal val messageMenuActionGuardsFingerprint = findFieldListDirect {
+    val menu = messageActionMenu()
+    val models = menu.paramTypeNames.toSet()
+    val code = menu.instructions
+    code.indices.filter { at ->
+        val f = code[at].fieldRef
+        code[at].opcode == OP_SGET_OBJECT && f != null && f.typeName == f.declaredClassName
+    }.mapNotNull { at ->
+        var back = at - 1
+        while (back >= 0 && code[back].opcode in OP_IF_ZERO) back--
+        val guard = code.getOrNull(back)?.takeIf { it.opcode == OP_IGET_BOOLEAN }?.fieldRef
+            ?.takeIf { it.declaredClassName in models } ?: return@mapNotNull null
+        guard to code[at].fieldRef!!
+    }.distinctBy { (g, a) -> g.descriptor + a.descriptor }.flatMap { (g, a) -> listOf(g, a) }
+}
+
+// Lambda dựng model menu cho một tin nhắn: invoke() tạo model. Redex gộp lambda (field Object + $t)
+// nên tin nhắn được tìm theo giá trị lúc chạy, không theo kiểu field.
+internal val messageMenuModelBuildersFingerprint = findMethodListDirect {
+    val model = messageMenuActionGuardsFingerprint().first().declaredClassName
+    findMethod {
+        matcher {
+            name = "invoke"
+            paramCount = 0
+            addInvoke { declaredClass(model); name = "<init>" }
+        }
+    }
+}
+
+// Cửa vào bộ lưu media của chat (DirectThreadMediaSaver): hàm static gọi hàm kiểm tra loại tin nhắn
+// (hàm có chuỗi "Invalid message contentType: "), cùng danh sách tham số.
+internal val directMediaSaverEntryFingerprint = findMethodDirect {
+    val check = findMethod { matcher { usingEqStrings("Invalid message contentType: ") } }.single()
+    findMethod {
+        matcher { declaredClass(check.declaredClassName); paramTypes(check.paramTypeNames); addInvoke(check.descriptor) }
+    }.single { it.isStaticMethod() }
+}
+
+// Hàm dựng menu nhấn giữ tin nhắn (cho patch tải tin nhắn thoại).
+internal val messageActionMenuFingerprint = findMethodDirect { messageActionMenu() }
+
+// Lời gọi tra tin nhắn ngay sau khi nạp chuỗi trace của menu (trả về tin nhắn đang được giữ).
+internal val messageMenuLookupFingerprint = findMethodDirect {
+    val code = messageActionMenu().instructions
+    val at = code.indexOfFirst { it.string == "DirectThreadFragment.showMessageActionDialog" }
+    code.drop(at + 1).firstNotNullOf { i -> i.methodRef?.takeIf { '.' in it.returnTypeName && it.returnTypeName != "java.lang.String" } }
 }
