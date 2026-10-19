@@ -1,6 +1,20 @@
 package io.github.nexalloy.revanced.instagram
 
 import io.github.nexalloy.revanced.instagram.ads.HideAds
+import io.github.nexalloy.revanced.instagram.ads.HideBoostedReels
+import io.github.nexalloy.revanced.instagram.ads.HidePaidPartnershipReels
+import io.github.nexalloy.revanced.instagram.dm.DownloadVoiceMessages
+import io.github.nexalloy.revanced.instagram.dm.ShowLastActive
+import io.github.nexalloy.revanced.instagram.feed.ShowHiddenLikeCounts
+import io.github.nexalloy.revanced.instagram.ghost.HideActiveStatus
+import io.github.nexalloy.revanced.instagram.network.SkipSetupScreens
+import io.github.nexalloy.revanced.instagram.privacy.OpenLinksInBrowser
+import io.github.nexalloy.revanced.instagram.profile.FollowsYou
+import io.github.nexalloy.revanced.instagram.profile.SavedOnProfile
+import io.github.nexalloy.revanced.instagram.comment.SaveCommentPhoto
+import io.github.nexalloy.revanced.instagram.time.ShowStoryTime
+import io.github.nexalloy.revanced.instagram.time.ShowPostTime
+import io.github.nexalloy.revanced.instagram.time.ShowReelTime
 import io.github.nexalloy.revanced.instagram.network.BlockNetwork
 import io.github.nexalloy.revanced.instagram.tracking.SanitizeTrackingLinks
 import io.github.nexalloy.revanced.instagram.ghost.GhostInterceptor
@@ -30,8 +44,12 @@ import io.github.nexalloy.revanced.instagram.download.UploadInstants
 
 val InstagramPatches = arrayOf(
     HideAds,
+    HidePaidPartnershipReels,
+    HideBoostedReels,
     SanitizeTrackingLinks,
+    OpenLinksInBrowser,
     BlockNetwork,
+    SkipSetupScreens,
     GhostInterceptor,
     GhostScreenshot,
     GhostSeenState,
@@ -42,11 +60,21 @@ val InstagramPatches = arrayOf(
     GhostPermanentView,
     // GhostReplayLimit
     GhostViewLiveAnonymously,
+    HideActiveStatus,
     // GhostViewStoryMentions,
     ScreenshotPermission,
     // GhostChannelMarkAsRead,
     // GhostDMMarkAsRead,
     SaveDeletedMessages,
+    ShowLastActive,
+    DownloadVoiceMessages,
+    FollowsYou,
+    SavedOnProfile,
+    SaveCommentPhoto,
+    ShowHiddenLikeCounts,
+    ShowPostTime,
+    ShowReelTime,
+    ShowStoryTime,
     ReelDownload,
     PostDownload,
     StoryDownload,
