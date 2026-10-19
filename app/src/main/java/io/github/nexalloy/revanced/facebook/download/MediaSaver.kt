@@ -4,9 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaMuxer
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
@@ -18,16 +15,18 @@ import androidx.annotation.StringRes
 import app.morphe.extension.shared.Logger
 import io.github.nexalloy.BuildConfig
 import io.github.nexalloy.R
+import io.github.nexalloy.revanced.shared.media.Dash
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
+// Tải và lưu vào thư viện (Movies/Facebook, Pictures/Facebook). Mọi việc nặng chạy ở luồng nền,
+// chỉ khi người dùng bấm; không có gì chạy thường trực.
 internal object MediaSaver {
 
     private const val FOLDER = "Facebook"
@@ -41,6 +40,7 @@ internal object MediaSaver {
     @Volatile
     private var module: Context? = null
 
+    // Chuỗi nằm trong resource của module (values + values-vi), như phần tải của Instagram.
     fun t(ctx: Context, @StringRes id: Int, vararg args: Any?): String = runCatching {
         val res = module ?: ctx.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY).also { module = it }
         if (args.isEmpty()) res.getString(id) else res.getString(id, *args)
@@ -51,6 +51,9 @@ internal object MediaSaver {
         main.post { runCatching { Toast.makeText(ctx, text, Toast.LENGTH_SHORT).show() } }
     }
 
+    // ---- lối vào ----
+
+    // Video: ưu tiên manifest DASH (chất lượng cao nhất, ghép hình + tiếng không mã hóa lại), không được thì file thường.
     fun saveVideo(ctx: Context, id: String?, manifest: String?, urls: List<String>): Boolean {
         val files = urls.filter { Urls.isHttp(it) && Urls.isFacebookCdn(it) && !it.contains("<MPD") }.distinct()
         val tracks = manifest?.let { Dash.parse(it) }.orEmpty()
@@ -99,6 +102,8 @@ internal object MediaSaver {
         return true
     }
 
+    // ---- tải ----
+
     private fun fileName(id: String?, ext: String) =
         "facebook_${id?.takeIf { it.all(Char::isDigit) } ?: "media"}_${System.currentTimeMillis()}.$ext"
 
@@ -123,6 +128,7 @@ internal object MediaSaver {
             download(url, file)
             if (video) return publish(ctx, file, name, "video/mp4", video = true)
             val (mime, ext) = imageType(file)
+            // AVIF: thư viện của nhiều máy chưa đọc được → đổi sang JPEG.
             if (mime == "image/avif") {
                 val jpeg = avifToJpeg(ctx, file)
                 try { publish(ctx, jpeg, name, "image/jpeg", video = false) } finally { jpeg.delete() }
@@ -158,6 +164,7 @@ internal object MediaSaver {
         return jpeg
     }
 
+    // Ghép track hình và track tiếng (mỗi cái một file mp4) bằng MediaMuxer, không mã hóa lại.
     private fun saveDash(ctx: Context, video: Dash.Track, audio: Dash.Track?, name: String) {
         val v = temp(ctx, ".v.mp4")
         val a = audio?.let { temp(ctx, ".a.mp4") }
@@ -165,41 +172,14 @@ internal object MediaSaver {
         try {
             download(video.url, v)
             a?.let { download(audio.url, it) }
-            mux(listOfNotNull(v, a), out)
+            Dash.mux(listOfNotNull(v, a), out)
             publish(ctx, out, name, "video/mp4", video = true)
         } finally {
             v.delete(); a?.delete(); out.delete()
         }
     }
 
-    private fun mux(inputs: List<File>, out: File) {
-        val muxer = MediaMuxer(out.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val extractors = inputs.map { file ->
-            MediaExtractor().apply { setDataSource(file.path) }.also {
-                check(it.trackCount > 0) { "empty track" }
-                it.selectTrack(0)
-            }
-        }
-        try {
-            val tracks = extractors.map { muxer.addTrack(it.getTrackFormat(0)) }
-            muxer.start()
-            val buffer = ByteBuffer.allocate(4 * 1024 * 1024)
-            val info = MediaCodec.BufferInfo()
-            extractors.forEachIndexed { i, ex ->
-                while (true) {
-                    val size = ex.readSampleData(buffer, 0)
-                    if (size < 0) break
-                    info.set(0, size, ex.sampleTime, ex.sampleFlags and MediaCodec.BUFFER_FLAG_KEY_FRAME)
-                    muxer.writeSampleData(tracks[i], buffer, info)
-                    ex.advance()
-                }
-            }
-            muxer.stop()
-        } finally {
-            extractors.forEach { it.release() }
-            runCatching { muxer.release() }
-        }
-    }
+    // ---- ghi vào thư viện ----
 
     private fun publish(ctx: Context, file: File, name: String, mime: String, video: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
