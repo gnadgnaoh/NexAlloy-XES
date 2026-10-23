@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ig_dl_audio_title">Download audio</string>
+    <string name="ig_toast_downloading_audio">Downloading audio…</string>
+    <string name="ig_toast_audio_saved">Audio saved</string>
+    <string name="ig_toast_no_audio">This has no audio to save</string>
+    <string name="ig_follows_you">Follows you</string>
+    <string name="ig_doesnt_follow_you">Doesn\'t follow you</string>
+    <string name="ig_following_each_other">Following each other</string>
+    <string name="ig_profile_pic_view">View profile picture</string>
+    <string name="ig_profile_pic_download">Download profile picture</string>
+    <string name="ig_copy_username">Copy username</string>
+    <string name="ig_copy_bio">Copy bio</string>
+    <string name="ig_copied">Copied</string>
+    <string name="ig_active_at">Active at %1$s</string>
+    <string name="ig_saved_label">Saved</string>
+    <string name="ig_mention_one">1 mention</string>
+    <string name="ig_mentions_many">%1$d mentions</string>
+    <string name="ig_mentions_title">Mentioned in this story</string>
+    <string name="ig_close">Close</string>
+</resources>

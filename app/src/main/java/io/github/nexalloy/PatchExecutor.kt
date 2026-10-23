@@ -20,7 +20,6 @@ import io.github.libxposed.api.XposedInterface.Hooker
 import io.github.libxposed.api.XposedModuleInterface
 import io.github.nexalloy.BuildConfig.DEBUG
 import io.github.nexalloy.morphe.Fingerprint
-import io.github.nexalloy.morphe.FingerprintQueryCache
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.DexKitCacheBridge
 import org.luckypray.dexkit.annotations.DexKitExperimentalApi
@@ -31,6 +30,7 @@ import org.luckypray.dexkit.wrap.DexClass
 import org.luckypray.dexkit.wrap.DexField
 import org.luckypray.dexkit.wrap.DexMethod
 import java.lang.reflect.Constructor
+import java.lang.reflect.Field
 import java.lang.reflect.Member
 import java.lang.reflect.Method
 import kotlin.reflect.KProperty0
@@ -143,6 +143,13 @@ class SharedPrefCache(app: Application) : DexKitCacheBridge.Cache {
     }
 }
 
+class FingerprintNotFoundException(
+    key: String, cause: Throwable?
+) : Exception(
+    "Fingerprint $key not found" + (cause?.let { ": ${it.javaClass.simpleName}: ${it.message}" } ?: ""),
+    cause,
+)
+
 class DependedHookFailedException(
     subHookName: String, exception: Throwable
 ) : Exception("Depended hook $subHookName failed.", exception)
@@ -167,34 +174,87 @@ class PatchExecutor(
     // cache
     private val moduleRel = BuildConfig.COMMIT_HASH
     private var cache = SharedPrefCache(appContext)
-    private var dexkit = run {
+    private val dexSource: DexSource = dexSourceByPackage[lpparam.packageName] ?: DexSource.APK_PATH
+
+    init {
         System.loadLibrary("dexkit")
         DexKitCacheBridge.init(cache)
-        DexKitCacheBridge.create("", lpparam.applicationInfo.sourceDir)
     }
 
+    private fun openDexKit() = when (dexSource) {
+        DexSource.CLASS_LOADER -> DexKitCacheBridge.create(lpparam.packageName, classLoader)
+        DexSource.APK_PATH -> DexKitCacheBridge.create("", lpparam.applicationInfo.sourceDir)
+        DexSource.APK_WITH_SPLITS ->
+            if (lpparam.applicationInfo.splitSourceDirs.isNullOrEmpty()) {
+                DexKitCacheBridge.create("", lpparam.applicationInfo.sourceDir)
+            } else {
+                // The default class loader already holds base.apk + installed (non-isolated) splits.
+                DexKitCacheBridge.create(lpparam.packageName, classLoader)
+            }
+    }
+
+    private var dexkit = openDexKit()
+    
     fun applyPatches(patches: Array<Patch>) {
         this.patches = patches
+        if (dexSource == DexSource.CLASS_LOADER) {
+            runCatching { dexkit.close() }
+            dexGate = KatanaDexGate(this).also { it.start() }
+            return
+        }
         val t = measureTimeMillis {
             loadCacheIfValid()
             try {
-                XposedBridge.log("NexAlloy version: ${BuildConfig.BUILD_TYPE} ${BuildConfig.VERSION_NAME} ${BuildConfig.COMMIT_HASH}")
-                XposedBridge.log("${lpparam.applicationInfo.packageName} version: ${getAppVersion()}")
-
                 executePatches()
                 finalizePatching()
                 logDebugInfo()
             } finally {
-                try {
-                    dexkit.close()
-                } finally {
-                    FingerprintQueryCache.shared.clearClosedBridges()
-                }
+                dexkit.close()
             }
         }
         Logger.printDebug { "${lpparam.packageName} handleLoadPackage: ${t}ms" }
     }
 
+    private var dexGate: KatanaDexGate? = null
+    private var cacheChecked = false
+
+    internal val enabledPatchCount: Int
+        get() = patches.count { patchPreferences?.getBoolean(it.name, it.use) ?: it.use }
+
+    internal val outstandingPatchCount: Int
+        get() = enabledPatchCount - appliedPatches.size
+
+    internal fun runDeferredAttempt(finalAttempt: Boolean, probe: () -> Boolean): Boolean {
+        if (!finalAttempt && !runCatching { probe() }.getOrDefault(false)) {
+            Logger.printDebug { "${lpparam.packageName}: dex not ready yet, will retry" }
+            return false
+        }
+        val bridge = runCatching { openDexKit() }.getOrElse { err ->
+            XposedBridge.log(err)
+            return false
+        }
+        try {
+            dexkit = bridge
+            if (!cacheChecked) {
+                loadCacheIfValid()
+                cacheChecked = true
+            }
+            failedPatches.clear()
+            val t = measureTimeMillis { executePatches() }
+            Logger.printDebug {
+                "${lpparam.packageName} attempt: ${t}ms applied=${appliedPatches.size}/$enabledPatchCount"
+            }
+            val done = outstandingPatchCount <= 0 && failedPatches.isEmpty()
+            if (done || finalAttempt) {
+                finalizePatching()
+                logDebugInfo()
+            }
+            return done
+        } finally {
+            runCatching { bridge.close() }
+        }
+    }
+    
     @Suppress("UNCHECKED_CAST")
     private fun loadCacheIfValid() {
         // cache by host update time + module version
@@ -245,6 +305,7 @@ class PatchExecutor(
     private fun logDebugInfo() {
         val success = failedPatches.isEmpty()
         if (DEBUG) {
+            XposedBridge.log("${lpparam.applicationInfo.packageName} version: ${getAppVersion()}")
             if (success) {
                 Utils.showToastLong("apply patches success")
             }
@@ -305,7 +366,7 @@ class PatchExecutor(
     val KProperty0<FindFieldFunc>.field
         get() = dexField.toField()
 
-    val KProperty0<FindFieldListFunc>.fieldList
+    val KProperty0<FindFieldListFunc>.fieldList: List<Field>
         get() = dexkit.getFieldsDirect(this.name, wrapFindList(this.name, this.get()) { it.descriptor })
             .map { it.toField() }
 
@@ -349,6 +410,7 @@ class PatchExecutor(
     private inline fun <reified T : Any> wrapFind(
         key: String,
         crossinline funcFunc: DexKitBridge.() -> T,
+        crossinline onError: (Throwable) -> Unit = {},
         crossinline serializer: (T) -> String
     ): DexKitBridge.() -> T? {
         return {
@@ -356,6 +418,7 @@ class PatchExecutor(
                 funcFunc().also { Logger.printInfo { "$key Matches: ${serializer(it)}" } }
             } catch (e: Exception) {
                 Logger.printInfo({ "Fingerprint $key Not Found" }, e)
+                onError(e)
                 null
             }
         }
@@ -380,15 +443,27 @@ class PatchExecutor(
 
     private inline fun getDexClass(
         key: String, crossinline findFunc: DexKitBridge.() -> ClassData
-    ): DexClass = dexkit.getClassDirectOrNull(key, wrapFind(key, findFunc) { it.descriptor })!!
+    ): DexClass {
+        var failure: Throwable? = null
+        return dexkit.getClassDirectOrNull(key, wrapFind(key, findFunc, { failure = it }) { it.descriptor })
+            ?: throw FingerprintNotFoundException(key, failure)
+    }
 
     private inline fun getDexMethod(
         key: String, crossinline findFunc: DexKitBridge.() -> MethodData
-    ): DexMethod = dexkit.getMethodDirectOrNull(key, wrapFind(key, findFunc) { it.descriptor })!!
+    ): DexMethod {
+        var failure: Throwable? = null
+        return dexkit.getMethodDirectOrNull(key, wrapFind(key, findFunc, { failure = it }) { it.descriptor })
+            ?: throw FingerprintNotFoundException(key, failure)
+    }
 
     private inline fun getDexField(
         key: String, crossinline findFunc: DexKitBridge.() -> FieldData
-    ): DexField = dexkit.getFieldDirectOrNull(key, wrapFind(key, findFunc) { it.descriptor })!!
+    ): DexField {
+        var failure: Throwable? = null
+        return dexkit.getFieldDirectOrNull(key, wrapFind(key, findFunc, { failure = it }) { it.descriptor })
+            ?: throw FingerprintNotFoundException(key, failure)
+    }
 
     private inline fun getDexMethods(
         key: String, crossinline findFunc: DexKitBridge.() -> List<MethodData>

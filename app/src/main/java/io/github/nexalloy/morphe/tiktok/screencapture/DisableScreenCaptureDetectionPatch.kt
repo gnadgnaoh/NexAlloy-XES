@@ -1,0 +1,71 @@
+package io.github.nexalloy.morphe.tiktok.screencapture
+
+import android.app.Activity
+import android.content.Context
+import de.robv.android.xposed.XC_MethodReplacement
+import io.github.nexalloy.findClassOrNull
+import io.github.nexalloy.hookMethod
+import io.github.nexalloy.morphe.tiktok.shared.realMatches
+import io.github.nexalloy.patch
+
+private const val TAG = "[TikTok screen capture]"
+
+private val SCREENSHOT_TASKS = listOf(
+    "com.ss.android.ugc.aweme.legoImpl.task.ScreenShotTask",
+    "com.ss.android.ugc.aweme.legoImp.task.ScreenShotTaskHolder\$BootFinish",
+    "com.ss.android.ugc.aweme.legoImpl.task.ScreenShotFeedbackTask",
+    "com.ss.android.ugc.aweme.legoImp.task.ScreenShotFeedbackTaskHolder\$BootFinish",
+    "com.ss.android.ugc.aweme.legoImp.task.ScreenRecordingMonitorInitTask",
+    "com.ss.android.ugc.aweme.im.sharepanel.impl.screenshotshare.InternalShareScreenshotTask",
+    "com.ss.android.ugc.aweme.im.sharepanel.impl.screenshotshare.InternalShareScreenshotTaskHolder\$BootFinish",
+)
+
+private const val SCREENSHOT_FEEDBACK_SERVICE =
+    "com.ss.android.ugc.aweme.feedback.screenshot.ScreenShotFeedbackService"
+private val SCREENSHOT_FEEDBACK_TRIGGERS = setOf("onShot", "tryShowScreenShotFloatingView")
+
+val DisableScreenCaptureDetection = patch(
+    name = "Disable screen capture detection",
+    description = "Prevents TikTok from reacting to screenshots and screen recordings.",
+) {
+    run {
+        val methods = Activity::class.java.declaredMethods.filter {
+            it.name == "registerScreenCaptureCallback" || it.name == "unregisterScreenCaptureCallback"
+        }
+        check(methods.isNotEmpty()) { "Activity has no screen capture callback API" }
+        methods.forEach { method ->
+            method.hookMethod {
+                before { param -> param.result = null }
+            }
+        }
+    }
+
+    run {
+        val listeners = ::clearModeDisplayListenerFingerprints.dexMethodList.realMatches()
+        check(listeners.isNotEmpty()) { "ClearModePanelComponent display listener not found" }
+        listeners.forEach { it.toMethod().hookMethod(XC_MethodReplacement.DO_NOTHING) }
+    }
+
+    run {
+        val hooked = SCREENSHOT_TASKS.count { name ->
+            val task = name.findClassOrNull(classLoader) ?: return@count false
+            val run = task.declaredMethods
+                .firstOrNull { it.name == "run" && it.parameterTypes.contentEquals(arrayOf<Class<*>>(Context::class.java)) }
+                ?: return@count false
+            run.hookMethod(XC_MethodReplacement.DO_NOTHING)
+            true
+        }
+        check(hooked > 0) { "none of the ${SCREENSHOT_TASKS.size} screenshot tasks found" }
+    }
+
+    run {
+        val service = SCREENSHOT_FEEDBACK_SERVICE.findClassOrNull(classLoader)
+            ?: error("$SCREENSHOT_FEEDBACK_SERVICE not found")
+        val methods = service.declaredMethods.filter {
+            it.name in SCREENSHOT_FEEDBACK_TRIGGERS && it.returnType == Boolean::class.javaPrimitiveType
+        }
+        check(methods.isNotEmpty()) { "no screenshot feedback trigger found" }
+        methods.forEach { it.hookMethod(XC_MethodReplacement.returnConstant(false)) }
+    }
+
+}

@@ -1,0 +1,69 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: true
+
+    - name: set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Write key
+      run: |
+        echo KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} > signing.properties
+        echo KEYSTORE_ALIAS=${{ secrets.KEYSTORE_ALIAS }} >> signing.properties
+        echo KEYSTORE_ALIAS_PASSWORD='${{ secrets.KEYSTORE_ALIAS_PASSWORD }}' >> signing.properties
+        echo KEYSTORE_FILE=../key.jks >> signing.properties
+        echo ${{ secrets.KEYSTORE }} | base64 --decode > key.jks
+
+    - name: Build Debug
+      run: ./gradlew assembleDebug
+
+    - name: Build Release
+      run: ./gradlew assembleRelease
+
+    - name: Upload a Debug Artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: nexalloy-ci-debug-apk
+        path: app/build/outputs/apk/debug
+
+    - name: Upload a Release Artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: nexalloy-ci-release-apk
+        path: |
+          app/build/outputs/apk/release
+          app/build/outputs/mapping/release/mapping.txt
+
+    - name: Create AutoBuild Release
+      run: |
+        LATEST_REL=$(gh release view --json tagName -q .tagName)
+        GIT_DESCRIBE=$(git rev-parse --short HEAD)
+        cd app/build/outputs/apk/release/
+        mv app-release.apk NexAlloy-${GIT_DESCRIBE}.apk
+        gh release delete autobuild --yes || true
+        gh release create autobuild NexAlloy-${GIT_DESCRIBE}.apk \
+          --prerelease \
+          --title "Nightly Build ${GIT_DESCRIBE}" \
+          --notes "Nightly build from commit ${GIT_DESCRIBE}. See changes: https://github.com/${{ github.repository }}/compare/${LATEST_REL}...main"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
