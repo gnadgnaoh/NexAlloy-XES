@@ -3,6 +3,7 @@ package io.github.nexalloy.revanced.instagram
 import io.github.nexalloy.revanced.instagram.ads.HideAds
 import io.github.nexalloy.revanced.instagram.ads.HideBoostedReels
 import io.github.nexalloy.revanced.instagram.ads.HidePaidPartnershipReels
+import io.github.nexalloy.revanced.instagram.dm.DownloadDisappearingMedia
 import io.github.nexalloy.revanced.instagram.dm.DownloadVoiceMessages
 import io.github.nexalloy.revanced.instagram.dm.ShowLastActive
 import io.github.nexalloy.revanced.instagram.ghost.HideActiveStatus
@@ -64,6 +65,7 @@ val InstagramPatches = arrayOf(
     SaveDeletedMessages,
     ShowLastActive,
     DownloadVoiceMessages,
+    DownloadDisappearingMedia,
     FollowsYou,
     FollowStatusChip,
     SavedOnProfile,
