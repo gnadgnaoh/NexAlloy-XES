@@ -92,6 +92,10 @@ private val MESSAGE_FIELD_KEYS = listOf(
     "media",
     "voice_media",
     "raven_media",
+    "visual_media",
+    "is_disappearing",
+    "message_ephemeral_lifetime_ms",
+    "message_expiration_timestamp_ms",
 )
 
 private fun DexKitBridge.messageFields(): Map<String, FieldData> = once("messageFields") {
@@ -156,6 +160,14 @@ internal val messageMediaField = findFieldDirect { messageField("media") }
 internal val messageVoiceMediaField = findFieldDirect { messageField("voice_media") }
 
 internal val messageRavenMediaField = findFieldDirect { messageField("raven_media") }
+
+internal val messageVisualMediaField = findFieldDirect { messageField("visual_media") }
+
+internal val messageIsDisappearingField = findFieldDirect { messageField("is_disappearing") }
+
+internal val messageEphemeralLifetimeField = findFieldDirect { messageField("message_ephemeral_lifetime_ms") }
+
+internal val messageExpirationTimestampField = findFieldDirect { messageField("message_expiration_timestamp_ms") }
 
 private fun DexKitBridge.voiceClassName(): String = once("voiceClassName") {
     messageField("voice_media").typeName
