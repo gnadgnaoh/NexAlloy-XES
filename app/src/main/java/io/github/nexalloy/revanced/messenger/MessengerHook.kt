@@ -8,6 +8,7 @@ import io.github.nexalloy.revanced.messenger.media.SaveAnyStory
 import io.github.nexalloy.revanced.messenger.media.SendPhotosAtOriginalQuality
 import io.github.nexalloy.revanced.messenger.media.SendVideosWithoutReencoding
 import io.github.nexalloy.revanced.messenger.privacy.AllowScreenshots
+import io.github.nexalloy.revanced.messenger.privacy.HideActiveStatus
 import io.github.nexalloy.revanced.messenger.privacy.HideReadReceipts
 import io.github.nexalloy.revanced.messenger.privacy.HideTypingIndicator
 import io.github.nexalloy.revanced.messenger.privacy.StopAdAttributionUploads
@@ -18,6 +19,7 @@ import io.github.nexalloy.revanced.messenger.privacy.ViewStoriesAnonymously
 val MessengerPatches = arrayOf<Patch>(
     HideTypingIndicator,
     HideReadReceipts,
+    HideActiveStatus,
     AllowScreenshots,
     ViewStoriesAnonymously,
     StopAnalyticsUploads,
