@@ -1,8 +1,8 @@
 package io.github.nexalloy.morphe.youtube.misc.litho.rendernext
 
 import de.robv.android.xposed.XC_MethodReplacement
-import io.github.nexalloy.morphe.music.misc.playservice.versionCheckPatch
 import io.github.nexalloy.morphe.youtube.insertLiteralOverride
+import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_29_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_47_or_greater
 import io.github.nexalloy.patch
@@ -11,7 +11,7 @@ val disableRenderNextPatch = patch(
     description = "Disables RenderNext, so the app is always rendered with Litho.",
 ) {
 
-    dependsOn(versionCheckPatch)
+    dependsOn(VersionCheck)
 
     // Do not provide ElementsServices to the section list, required to convert Litho components.
     insertLiteralOverride(45661418L)

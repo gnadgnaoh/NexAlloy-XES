@@ -2,12 +2,16 @@ package io.github.nexalloy.morphe.youtube.misc.debugging
 
 import io.github.nexalloy.morphe.shared.misc.debugging.enableDebuggingPatch
 import io.github.nexalloy.morphe.shared.misc.settings.preference.SwitchPreference
+import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_40_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_41_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_42_or_greater
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 
 val EnableDebugging = enableDebuggingPatch(
+    block = {
+        dependsOn(VersionCheck)
+    },
     hookIndexedBooleanFeatureFlag = { is_21_42_or_greater },
     hookStringFeatureFlag = { true },
     // 20.40 has changes not worth supporting.

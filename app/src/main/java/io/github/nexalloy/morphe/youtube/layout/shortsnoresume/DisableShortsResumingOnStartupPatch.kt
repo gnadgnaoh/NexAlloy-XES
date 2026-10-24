@@ -1,9 +1,9 @@
 package io.github.nexalloy.morphe.youtube.layout.shortsnoresume
 
 import app.morphe.extension.youtube.patches.DisableShortsResumingOnStartupPatch
-import io.github.nexalloy.morphe.music.misc.playservice.versionCheckPatch
 import io.github.nexalloy.morphe.shared.misc.settings.preference.SwitchPreference
 import io.github.nexalloy.morphe.youtube.insertLiteralOverride
+import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_03_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_30_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_41_or_greater
@@ -15,7 +15,7 @@ val DisableShortsResumingOnStartup = patch(
     name = "Disable Shorts resuming on startup",
     description = "Adds an option to disable Shorts from resuming on app startup when Shorts were last being watched.",
 ) {
-    dependsOn(versionCheckPatch)
+    dependsOn(VersionCheck)
 
     PreferenceScreen.SHORTS.addPreferences(
         SwitchPreference("morphe_disable_shorts_resuming_on_startup"),

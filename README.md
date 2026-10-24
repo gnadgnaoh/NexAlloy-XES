@@ -19,10 +19,17 @@
 > - **Having issues?** Check the **[FAQ](https://github.com/NexAlloy/NexAlloy/wiki/Frequently-Asked-Questions)** before reporting.
 
 ## Downloads
+
 - **Release build**: [Download](https://github.com/NexAlloy/NexAlloy/releases/latest)
-- **Nightly build**: [Download](https://nightly.link/NexAlloy/NexAlloy/workflows/android/main)
+- **Nightly build**: [Download](https://github.com/NexAlloy/NexAlloy/releases/tag/autobuild)
 
 <sub>If you've joined the YouTube beta program, please try the nightly build before reporting an issue.</sub>
+
+> [!TIP]
+> **Volunteers wanted:** Help test [nightly builds](https://nightly.link/NexAlloy/NexAlloy/workflows/android/main)
+> and [report crashes, regressions, or broken patches](https://github.com/NexAlloy/NexAlloy/issues/new/choose).
+> Use the [debug build](https://nightly.link/NexAlloy/NexAlloy/workflows/android/main/nexalloy-ci-debug-apk.zip) when reporting issues.
+> Your feedback helps us catch issues before release and improve the quality of stable builds.
 
 ## Patches
 

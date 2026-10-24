@@ -12,6 +12,7 @@ import io.github.nexalloy.injectHostClassLoaderToSelf
 import io.github.nexalloy.morphe.shared.misc.CheckRecycleBitmapMediaSession
 import io.github.nexalloy.morphe.shared.misc.debugging.experimentalBooleanFeatureFlagFingerprint
 import io.github.nexalloy.morphe.shared.misc.debugging.experimentalIndexedBooleanFeatureFlagFingerprint
+import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_42_or_greater
 import io.github.nexalloy.morphe.youtube.ad.HideAds
 import io.github.nexalloy.morphe.youtube.interaction.channelsearch.channelSearchPatch
@@ -71,6 +72,8 @@ fun insertLiteralOverride(id: Long, override: (Boolean) -> Boolean) {
 }
 
 val FeatureOverride = patch {
+    dependsOn(VersionCheck)
+
     val methods = mutableListOf(::experimentalBooleanFeatureFlagFingerprint.method)
     if (is_21_42_or_greater) {
         methods += ::experimentalIndexedBooleanFeatureFlagFingerprint.method

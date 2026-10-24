@@ -1,11 +1,11 @@
 package io.github.nexalloy.morphe.youtube.misc.backgesture
 
-import io.github.nexalloy.morphe.music.misc.playservice.versionCheckPatch
+import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_40_or_greater
 import io.github.nexalloy.patch
 
 val backGesturePatch = patch {
-    dependsOn(versionCheckPatch)
+    dependsOn(VersionCheck)
 
     YouTubeMainActivityOnBackPressedFingerprint.hookMethod {
         before {

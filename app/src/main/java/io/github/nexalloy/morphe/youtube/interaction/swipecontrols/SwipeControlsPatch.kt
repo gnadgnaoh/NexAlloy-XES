@@ -13,6 +13,7 @@ import io.github.nexalloy.morphe.shared.misc.settings.preference.SwitchPreferenc
 import io.github.nexalloy.morphe.shared.misc.settings.preference.TextPreference
 import io.github.nexalloy.morphe.youtube.insertLiteralOverride
 import io.github.nexalloy.morphe.youtube.misc.playertype.PlayerTypeHook
+import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_34_or_greater
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.morphe.youtube.shared.mainActivityClass
@@ -27,7 +28,8 @@ val SwipeControls = patch(
     dependsOn(
         PlayerTypeHook,
         VideoInformationPatch,
-        soundBoostPatch
+        soundBoostPatch,
+        VersionCheck
     )
 
 //    if (!is_20_34_or_greater) {

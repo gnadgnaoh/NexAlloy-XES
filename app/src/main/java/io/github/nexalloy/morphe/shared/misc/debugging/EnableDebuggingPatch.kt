@@ -13,6 +13,7 @@ import io.github.nexalloy.patch
 import io.github.nexalloy.atLast
 
 fun enableDebuggingPatch(
+    block: PatchExecutor.() -> Unit = {},
     hookIndexedBooleanFeatureFlag: PatchExecutor.() -> Boolean,
     hookStringFeatureFlag: PatchExecutor.() -> Boolean,
     hookLongFeatureFlag: PatchExecutor.() -> Boolean,
@@ -23,6 +24,8 @@ fun enableDebuggingPatch(
     name = "Enable debugging",
     description = "Adds options for debugging and exporting Morphe logs to the clipboard.",
 ) {
+    block()
+
     val preferences = mutableSetOf<BasePreference>(
         SwitchPreference("morphe_debug"),
     )
