@@ -20,6 +20,7 @@ import io.github.nexalloy.revanced.facebook.link.SanitizeShareLinks
 import io.github.nexalloy.revanced.facebook.privacy.AllowScreenCapture
 import io.github.nexalloy.revanced.facebook.privacy.BlockScreenCaptureDetection
 import io.github.nexalloy.revanced.facebook.privacy.HideCommentTyping
+import io.github.nexalloy.revanced.facebook.privacy.HideActiveStatus
 import io.github.nexalloy.revanced.facebook.privacy.HideSeenStory
 import io.github.nexalloy.revanced.facebook.privacy.HoldAnalyticsUploads
 import io.github.nexalloy.revanced.facebook.stories.UploadStoriesInHd
@@ -40,6 +41,7 @@ val FacebookPatches = arrayOf(
     BlockScreenCaptureDetection,
     HoldAnalyticsUploads,
     HideCommentTyping,
+    HideActiveStatus,
     CleanLinks,
     OpenLinksInBrowser,
     SanitizeShareLinks,
