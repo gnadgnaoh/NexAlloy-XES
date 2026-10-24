@@ -5,11 +5,14 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Collections
 import java.util.Date
@@ -24,6 +27,8 @@ object CallRecordingOutput {
 
     internal const val TEMP_DIRECTORY = "nexalloy_call_recordings"
     private const val SHARED_DIRECTORY = "Recordings/Zalo Call Recordings"
+    private const val WAV_READY_TIMEOUT_MS = 5_000L
+    private const val WAV_READY_POLL_MS = 100L
     private val PART_NAME: Pattern = Pattern.compile(
         "zalo-call-(\\d{13})-(incoming|outgoing|unknown)-([0-9a-f]{8})\\.part"
     )
@@ -58,6 +63,85 @@ object CallRecordingOutput {
     fun repairNativeImport(file: File?): Boolean =
         file != null && file.isFile && CallRecordingTranscoder.repairHeader(file)
 
+    private fun awaitNativeWav(file: File): Boolean {
+        val deadline = System.currentTimeMillis() + WAV_READY_TIMEOUT_MS
+        var previousLength = -1L
+        var stablePasses = 0
+        while (System.currentTimeMillis() <= deadline) {
+            val length = if (!file.isFile) -1L else file.length()
+            if (length > 0L && isNativeImportReady(file)) {
+                if (length == previousLength) {
+                    stablePasses++
+                    if (stablePasses >= 2) return true
+                } else {
+                    stablePasses = 0
+                }
+            } else {
+                stablePasses = 0
+            }
+            previousLength = length
+            try {
+                Thread.sleep(WAV_READY_POLL_MS)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return repairNativeImport(file)
+    }
+
+    private fun sidecarFor(wavFile: File): File =
+        File(wavFile.parentFile, wavFile.name + ".json")
+
+    private fun writeSidecar(
+        wavFile: File,
+        startedAt: Long,
+        displayName: String?,
+        phoneNumber: String?,
+    ) {
+        try {
+            val json = JSONObject()
+            json.put("started_at", startedAt)
+            json.put("display_name", displayName ?: "")
+            json.put("phone_number", phoneNumber ?: "")
+            FileOutputStream(sidecarFor(wavFile)).use { output ->
+                output.write(json.toString().toByteArray(StandardCharsets.UTF_8))
+                output.fd.sync()
+            }
+        } catch (ignored: Throwable) {
+        }
+    }
+
+    private fun readSidecar(wavFile: File): RecoveryMeta? {
+        val sidecar = sidecarFor(wavFile)
+        if (!sidecar.isFile) return null
+        return try {
+            val json = JSONObject(sidecar.readText(StandardCharsets.UTF_8))
+            RecoveryMeta(
+                json.optLong("started_at", 0L),
+                json.optString("display_name", ""),
+                json.optString("phone_number", "")
+            )
+        } catch (ignored: Throwable) {
+            null
+        }
+    }
+
+    private fun deleteSidecar(wavFile: File) {
+        sidecarFor(wavFile).delete()
+    }
+
+    private fun markBad(file: File) {
+        file.renameTo(File(file.parentFile, file.name + ".bad"))
+        deleteSidecar(file)
+    }
+
+    private class RecoveryMeta(
+        @JvmField val startedAt: Long,
+        @JvmField val displayName: String,
+        @JvmField val phoneNumber: String,
+    )
+
     fun finalizeRecording(
         context: Context?,
         wavFile: File?,
@@ -79,10 +163,12 @@ object CallRecordingOutput {
             try {
                 val contact =
                     CallRecordingContacts.resolve(app, peerUid, fallbackName, fallbackPhone)
+                writeSidecar(wavFile, startedAt, contact.displayName, contact.phoneNumber)
                 val ok = convertAndPublish(
                     app, wavFile, startedAt,
                     contact.displayName, contact.phoneNumber
                 )
+                if (ok) deleteSidecar(wavFile)
                 if (listener != null) {
                     if (ok) listener.onSaved() else listener.onFailed()
                 }
@@ -98,13 +184,23 @@ object CallRecordingOutput {
             val pending = tempDirectory(app).listFiles { _, name -> name.endsWith(".part") }
                 ?: return@execute
             for (file in pending) {
-                if (!isNativeImportReady(file) && !repairNativeImport(file)) continue
+                if (!isNativeImportReady(file) && !repairNativeImport(file)) {
+                    markBad(file)
+                    continue
+                }
+                val meta = readSidecar(file)
                 val matcher = PART_NAME.matcher(file.name)
-                val startedAt =
-                    if (matcher.matches()) parseLong(matcher.group(1)) else file.lastModified()
-                val ok = convertAndPublish(app, file, startedAt, "Zalo contact", "")
-                if (listener != null) {
-                    if (ok) listener.onSaved() else listener.onFailed()
+                val startedAt = meta?.startedAt?.takeIf { it > 0L }
+                    ?: if (matcher.matches()) parseLong(matcher.group(1)) else file.lastModified()
+                val displayName = meta?.displayName?.takeIf { it.isNotEmpty() } ?: "Zalo contact"
+                val phoneNumber = meta?.phoneNumber ?: ""
+                val ok = convertAndPublish(app, file, startedAt, displayName, phoneNumber)
+                if (ok) {
+                    deleteSidecar(file)
+                    listener?.onSaved()
+                } else {
+                    markBad(file)
+                    listener?.onFailed()
                 }
             }
         }
@@ -117,7 +213,7 @@ object CallRecordingOutput {
         displayName: String,
         phoneNumber: String,
     ): Boolean {
-        if (!isNativeImportReady(wavFile) && !repairNativeImport(wavFile)) return false
+        if (!awaitNativeWav(wavFile)) return false
         val encoded = File(wavFile.parentFile, wavFile.name + ".m4a.tmp")
         return try {
             CallRecordingTranscoder.wavToM4a(wavFile, encoded)

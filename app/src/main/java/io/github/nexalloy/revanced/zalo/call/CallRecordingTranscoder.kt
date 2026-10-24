@@ -114,6 +114,9 @@ internal object CallRecordingTranscoder {
                         activeCodec.releaseOutputBuffer(outputIndex, false)
                     }
                 }
+                if (!muxerStarted) throw IOException("AAC muxer did not start")
+                activeMuxer.stop()
+                muxerStarted = false
             }
         } finally {
             codec?.let {

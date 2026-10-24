@@ -20,12 +20,19 @@ val AutoRecordCalls = patch(
         "Recordings/Zalo Call Recordings as M4A. Runs the native ZRTC recorder. " +
         "Default off. Recording calls may require the consent of all parties " +
         "where you live — check local law before enabling.",
+    use = false,
 ) {
     val symbols = ResolvedCallSymbols(
-        callbackImpl = ::callCallbackImplFingerprint.clazz,
-        peerAccessor = ::callPeerManagerAccessorFingerprint.method.apply { isAccessible = true },
-        peerContainer = ::callPeerContainerField.field.apply { isAccessible = true },
-        peerHandle = ::callPeerHandleField.field.apply { isAccessible = true },
+        callbackImpl = runCatching { ::callCallbackImplFingerprint.clazz }.getOrNull(),
+        peerAccessor = runCatching {
+            ::callPeerManagerAccessorFingerprint.method.apply { isAccessible = true }
+        }.getOrNull(),
+        peerContainer = runCatching {
+            ::callPeerContainerField.field.apply { isAccessible = true }
+        }.getOrNull(),
+        peerHandle = runCatching {
+            ::callPeerHandleField.field.apply { isAccessible = true }
+        }.getOrNull(),
     )
     CallRecorder.install(this, symbols)
 }
@@ -45,7 +52,6 @@ private object CallRecorder {
     private const val INCOMING_CALL = "zrtc_peer_incoming_call"
     private const val REGISTER_CALLBACK = "zrtc_peer_register_callback"
     private const val START_RECORD = "zrtc_peer_start_record_audio"
-    private const val IS_IN_CALL = "zrtc_peer_is_in_call"
 
     private val SESSIONS: MutableMap<Any, Session> =
         Collections.synchronizedMap(WeakHashMap())
@@ -56,7 +62,6 @@ private object CallRecorder {
         Collections.synchronizedSet(HashSet())
 
     @Volatile private var recordMethod: Method? = null
-    @Volatile private var isInCallMethod: Method? = null
     @Volatile private var appContext: Context? = null
     @Volatile private var symbols: ResolvedCallSymbols? = null
 
@@ -71,9 +76,6 @@ private object CallRecorder {
         recordMethod = peerClass.getDeclaredMethod(
             START_RECORD, Long::class.javaPrimitiveType,
             Boolean::class.javaPrimitiveType, String::class.java
-        ).apply { isAccessible = true }
-        isInCallMethod = peerClass.getDeclaredMethod(
-            IS_IN_CALL, Long::class.javaPrimitiveType
         ).apply { isAccessible = true }
 
         var hooks = 0
@@ -91,7 +93,6 @@ private object CallRecorder {
 
         recoverPending()
     }
-
 
     private fun hookPeerMetadata(peerClass: Class<*>): Int {
         var count = 0
@@ -128,7 +129,6 @@ private object CallRecorder {
         return count
     }
 
-
     private fun hookAudioStreamRegistration(peerClass: Class<*>): Int {
         var count = 0
         for (methodName in arrayOf(
@@ -154,7 +154,6 @@ private object CallRecorder {
         return count
     }
 
-
     private fun hookPeerTermination(peerClass: Class<*>): Int {
         var count = 0
         for (methodName in arrayOf(
@@ -170,7 +169,6 @@ private object CallRecorder {
         }
         return count
     }
-
 
     private fun hookCallbackRegistration(peerClass: Class<*>): Int =
         hookAllByName(peerClass, REGISTER_CALLBACK) {
@@ -257,7 +255,6 @@ private object CallRecorder {
         }
     }
 
-
     private fun hookActivities(classLoader: ClassLoader): Int {
         var count = 0
         for (className in CallRecordingSymbols.CALL_ACTIVITIES) {
@@ -273,7 +270,6 @@ private object CallRecorder {
         return count
     }
 
-
     private fun hookNotifications(): Int {
         val nmClass = loadOrNull("android.app.NotificationManager", CallRecorder::class.java.classLoader)
             ?: return 0
@@ -287,7 +283,6 @@ private object CallRecorder {
         }
         return count
     }
-
 
     private fun start(session: Session, trigger: String) {
         synchronized(session) {
@@ -373,7 +368,6 @@ private object CallRecorder {
         appContext?.let { CallRecordingOutput.recoverPending(it, null) }
     }
 
-
     private fun resolveCurrentSession(callback: Any?): Session? {
         callback ?: return null
         val resolved = symbols ?: return null
@@ -390,18 +384,6 @@ private object CallRecorder {
             session
         } catch (t: Throwable) {
             null
-        }
-    }
-
-
-    private fun isPeerActive(session: Session): Boolean {
-        if (session.deleted) return false
-        val method = isInCallMethod ?: return true
-        return try {
-            val value = method.invoke(null, session.peerHandle)
-            value !is Boolean || value
-        } catch (t: Throwable) {
-            true
         }
     }
 
@@ -425,7 +407,6 @@ private object CallRecorder {
         } catch (t: Throwable) {
             null
         }
-
 
     private class Session(val peerHandle: Long, val peerUid: String?) {
         var direction: String = "unknown"
