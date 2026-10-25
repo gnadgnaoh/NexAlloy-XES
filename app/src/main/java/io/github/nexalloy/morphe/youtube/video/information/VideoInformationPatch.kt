@@ -13,6 +13,8 @@ import io.github.nexalloy.morphe.shared.misc.litho.context.conversionContextPatc
 import io.github.nexalloy.morphe.shared.misc.textcomponent.hookSpannableString
 import io.github.nexalloy.morphe.shared.misc.textcomponent.textComponentPatch
 import io.github.nexalloy.morphe.shared.misc.videoinformation.playbackParametersSetterFingerprint
+import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
+import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_29_or_greater
 import io.github.nexalloy.morphe.youtube.shared.InitializePlaybackSpeedValuesFingerprint
 import io.github.nexalloy.morphe.youtube.shared.SpeedLimiterFingerprint
 import io.github.nexalloy.morphe.youtube.video.playerresponse.Hook
@@ -154,6 +156,7 @@ val VideoInformationPatch = patch(
         PlayerResponseMethodHook,
         conversionContextPatch,
         textComponentPatch,
+        VersionCheck,
     )
 
     //region playerController
@@ -322,17 +325,29 @@ val VideoInformationPatch = patch(
         }
     }
 
-    // Live state is also needed by the Shorts playback speed override.
+    // region Set channel information.
+
+    val channelId = ::playerResponseChannelIdMethod.method
+    val channelName = ::playerResponseChannelNameMethod.method
+    // The helper this resolves through only exists in later targets, and the title is
+    // only used by the minimal miniplayer, which is only rebuilt for those.
+    val videoTitle = if (is_21_29_or_greater) ::playerResponseVideoTitleMethod.method else null
     val isLive = ::playerResponseIsLiveMethod.method
     ::channelInformationMethods.dexMethodList.forEach { method ->
         method.hookMethod {
             before { param ->
-                VideoInformation.setLiveStream(isLive.invoke(param.args[0]) as Boolean)
+                val playerResponse = param.args[0]
+                VideoInformation.setChannelId(channelId.invoke(playerResponse) as String?)
+                VideoInformation.setChannelName(channelName.invoke(playerResponse) as String?)
+                if (videoTitle != null) {
+                    VideoInformation.setVideoTitle(videoTitle.invoke(playerResponse) as String?)
+                }
+                VideoInformation.setLiveStream(isLive.invoke(playerResponse) as Boolean)
             }
         }
     }
 
-    // TODO Set channel id, channel name and video title.
+    // endregion.
 
     addExoPlayerHooks()
 

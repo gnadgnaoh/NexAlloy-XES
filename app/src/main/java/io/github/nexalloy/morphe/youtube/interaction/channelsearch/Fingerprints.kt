@@ -114,11 +114,53 @@ internal object SearchBoxHintFingerprint : Fingerprint(
 
 val SearchSubmitFingerprint = findMethodDirect {
     try {
-        SearchSubmitFingerprint1()
+        SearchSubmitFingerprint2143()
     } catch (_: Exception) {
-        SearchSubmitFingerprint2()
+        try {
+            SearchSubmitFingerprint1()
+        } catch (_: Exception) {
+            SearchSubmitFingerprint2()
+        }
     }
 }
+
+/**
+ * Every search submit path funnels through this method, including suggestions and filter chips.
+ */
+@SkipTest
+internal object SearchSubmitFingerprint2143 : Fingerprint(
+    returnType = "V",
+    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
+    parameters = listOf(
+        "Ljava/lang/String;",
+        "I",
+        "Ljava/lang/String;",
+        "Ljava/lang/String;",
+        "Ljava/lang/String;",
+        "Ljava/lang/String;",
+        "Z",
+        "Ljava/lang/String;"
+    ),
+    filters = listOf(
+        methodCall( // 21.43+
+            parameters = listOf(
+                "Ljava/lang/String;",
+                "[B",
+                "Ljava/lang/String;",
+                "I",
+                "L",
+                "L",
+                "Ljava/lang/String;",
+                "Ljava/lang/String;",
+                "Ljava/lang/String;",
+                "Ljava/lang/String;",
+                "Z",
+                "Ljava/lang/String;"
+            ),
+            returnType = "V"
+        )
+    )
+)
 
 /**
  * Every search submit path funnels through this method, including suggestions and filter chips.
@@ -137,7 +179,7 @@ internal object SearchSubmitFingerprint1 : Fingerprint(
         "Z"
     ),
     filters = listOf(
-        methodCall( // 21.31+
+        methodCall( // 21.31 - 21.42
             parameters = listOf(
                 "Ljava/lang/String;",
                 "[B",

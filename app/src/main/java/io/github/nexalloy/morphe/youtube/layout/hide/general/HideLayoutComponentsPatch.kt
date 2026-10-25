@@ -45,7 +45,6 @@ import io.github.nexalloy.morphe.youtube.misc.navigation.NavigationBarHook
 import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_26_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_31_or_greater
-import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_07_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_11_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_26_or_greater
 import io.github.nexalloy.morphe.youtube.misc.proto.elementProtoParserHookPatch
@@ -651,13 +650,5 @@ val HideLayoutComponents = patch(
                 else -> return@after
             }
         }
-    }
-
-
-    // region disable UI padding feature flags
-
-    if (is_21_07_or_greater) {
-        insertLiteralOverride(45752241, LayoutComponentsFilter::disableUIPaddingFeatureFlags)
-        insertLiteralOverride(45724388, LayoutComponentsFilter::disableUIPaddingFeatureFlags)
     }
 }

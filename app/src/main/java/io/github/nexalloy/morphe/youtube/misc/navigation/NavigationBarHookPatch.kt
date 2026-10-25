@@ -3,7 +3,6 @@ package io.github.nexalloy.morphe.youtube.misc.navigation
 import android.graphics.drawable.Drawable
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import android.widget.FrameLayout
 import app.morphe.extension.shared.ResourceType
 import app.morphe.extension.shared.ResourceUtils
@@ -15,11 +14,18 @@ import io.github.nexalloy.enumValueOf
 import io.github.nexalloy.morphe.youtube.misc.backgesture.addBackPressedHook
 import io.github.nexalloy.morphe.youtube.misc.backgesture.addPredictiveBackGestureHook
 import io.github.nexalloy.morphe.youtube.misc.backgesture.backGesturePatch
+import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
+import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_43_or_greater
 import io.github.nexalloy.patch
 import io.github.nexalloy.scopedHook
 import org.luckypray.dexkit.wrap.DexMethod
 
 private val navigationButtonCreatedHooks = mutableListOf<(NavigationBar.NavigationButton, View) -> Unit>()
+private val bottomBarContainerHooks = mutableListOf<(View) -> Unit>()
+
+fun addBottomBarContainerHook(hook: (View) -> Unit) {
+    bottomBarContainerHooks.add(hook)
+}
 
 fun hookNavigationButtonCreated(hook: (button: NavigationBar.NavigationButton, view: View) -> Unit) {
     navigationButtonCreatedHooks.add(hook)
@@ -32,7 +38,7 @@ fun onNavigationTabCreated(button: NavigationBar.NavigationButton, tabView: View
 val NavigationBarHook = patch(
     description = "Hooks the active navigation or search bar.",
 ) {
-    dependsOn(backGesturePatch)
+    dependsOn(backGesturePatch, VersionCheck)
 
     // Hook the current navigation bar enum value. Note, the 'You' tab does not have an enum value.
     InitializeButtonsFingerprint.hookMethod(scopedHook(::getNavigationEnumMethod.member) {
@@ -40,9 +46,11 @@ val NavigationBarHook = patch(
     })
 
     // Hook the creation of navigation tab views.
-    InitializeButtonsFingerprint.hookMethod(scopedHook(::pivotBarButtonsCreateDrawableViewFingerprint.member) {
-        after { NavigationBar.navigationTabLoaded(it.result as View) }
-    })
+    if (!is_21_43_or_greater) {
+        InitializeButtonsFingerprint.hookMethod(scopedHook(::pivotBarButtonsCreateDrawableViewFingerprint.member) {
+            after { NavigationBar.navigationTabLoaded(it.result as View) }
+        })
+    }
 
 //    if (!is_20_28_or_greater) {
 //        // TODO
@@ -52,20 +60,20 @@ val NavigationBarHook = patch(
         scopedHook(
             PivotBarButtonsCreateResourceStyledViewFingerprint.member
         ) {
-            after {
-                val isYouTab = runCatching {
-                    Utils.getChildViewByResourceName<View>(
-                        it.result as ViewGroup,
-                        "you_tab_border"
-                    ) ?: throw Exception("You tab border not found")
-                }.isSuccess
-                if (isYouTab) {
-                    NavigationBar.setLastAppNavigationEnumYou()
-                }
-
-                NavigationBar.navigationTabLoaded(it.result as View)
-            }
+            after { NavigationBar.navigationImageResourceTabLoaded(it.result as View) }
         })
+
+    InitializeBottomBarContainerFingerprint.hookMethod(scopedHook(
+        ::bottomBarContainerListenerMethod.method
+    ) {
+        val bottomBarContainerId = ResourceUtils.getIdIdentifier("bottom_bar_container")
+        before {
+            val container = it.thisObject as View
+            if (innerDepth == 0 && container.id == bottomBarContainerId) {
+                bottomBarContainerHooks.forEach { hook -> hook(container) }
+            }
+        }
+    })
 
     val selectedTab = ThreadLocal<View>()
     PivotBarButtonsViewSetSelectedFingerprint.hookMethod {

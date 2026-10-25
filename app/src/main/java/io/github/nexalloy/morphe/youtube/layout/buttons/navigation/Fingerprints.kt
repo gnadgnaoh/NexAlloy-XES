@@ -10,6 +10,7 @@ import io.github.nexalloy.morphe.Opcode
 import io.github.nexalloy.morphe.OpcodesFilter
 import io.github.nexalloy.morphe.StrictQuery
 import io.github.nexalloy.morphe.fieldAccess
+import io.github.nexalloy.morphe.findClassDirect
 import io.github.nexalloy.morphe.findFieldDirect
 import io.github.nexalloy.morphe.findMethodDirect
 import io.github.nexalloy.morphe.findMethodListDirect
@@ -18,22 +19,33 @@ import io.github.nexalloy.morphe.methodCall
 import io.github.nexalloy.morphe.opcode
 import io.github.nexalloy.morphe.string
 import io.github.nexalloy.morphe.youtube.layout.hide.shorts.ShortsBottomBarContainerFingerprint
+import java.lang.reflect.Modifier
+
+internal const val PIVOT_BAR_CLASS = "Lcom/google/android/libraries/youtube/rendering/ui/pivotbar/PivotBar;"
 
 /**
  * Sets the bottom padding of the navigation bar to the bottom window inset, the room for
  * the system navigation buttons when the bar is drawn behind them. The bar height also grows
- * by the same value, which is first stored in a field of the bar.
+ * by the same value, which is first stored in a field of the bar and then added to its height.
  */
 @SkipTest
 internal object NavigationBarBottomPaddingFingerprint : Fingerprint(
     filters = listOf(
         fieldAccess(
             opcode = Opcode.IPUT,
-            definingClass = "Lcom/google/android/libraries/youtube/rendering/ui/pivotbar/PivotBar;",
+            definingClass = PIVOT_BAR_CLASS,
             type = "I"
         ),
+        // Sets the bar height to its content height and the room in the field.
         methodCall(
-            definingClass = "Lcom/google/android/libraries/youtube/rendering/ui/pivotbar/PivotBar;",
+            opcode = Opcode.INVOKE_VIRTUAL,
+            definingClass = PIVOT_BAR_CLASS,
+            parameters = listOf(),
+            returnType = "V",
+            location = MatchAfterImmediately()
+        ),
+        methodCall(
+            definingClass = PIVOT_BAR_CLASS,
             name = "setPadding",
             location = MatchAfterWithin(10)
         )
@@ -54,7 +66,7 @@ internal val navigationBarRelayoutMethods = findMethodListDirect {
     val paddingField = navigationBarBottomPaddingField()
     NavigationBarBottomPaddingFingerprint.matchAll().map { match ->
         // The stored padding is consumed by the immediately following height update.
-        val instruction = match.method.instructions[match.instructionMatches.first().index + 1]
+        val instruction = match.instructionMatches[1].instruction
         check(instruction.opcode == Opcode.INVOKE_VIRTUAL.opCode ||
                 instruction.opcode == Opcode.INVOKE_VIRTUAL_RANGE.opCode)
         val reference = instruction.methodRef!!
@@ -178,6 +190,37 @@ internal object NavigationBarBlurDrawFingerprint : Fingerprint(
     )
 )
 
+/**
+ * Sets the bottom padding of the list of a browse page laid out behind the navigation bar,
+ * to the navigation bar height plus the bottom window inset, once the window insets are known.
+ */
+@StrictQuery
+internal object BrowseListBottomPaddingFingerprint : Fingerprint(
+    returnType = "V",
+    parameters = listOf("Ljava/lang/Object;"),
+    filters = listOf(
+        methodCall(
+            definingClass = "Landroid/support/v7/widget/RecyclerView;",
+            name = "getPaddingRight"
+        ),
+        fieldAccess(
+            opcode = Opcode.IGET,
+            definingClass = "Landroid/graphics/Rect;",
+            name = "bottom",
+            location = MatchAfterWithin(6)
+        ),
+        methodCall(
+            definingClass = "Landroid/support/v7/widget/RecyclerView;",
+            name = "setPadding",
+            location = MatchAfterWithin(3)
+        )
+    )
+)
+
+internal val browseListSetPaddingMethod = findMethodDirect {
+    BrowseListBottomPaddingFingerprint.instructionMatches.last().instruction.methodRef!!
+}
+
 internal val shortsBottomRoomConstructor = findMethodDirect {
     val match = ShortsBottomBarContainerFingerprint.match()
     match.method.instructions.drop(match.instructionMatches[2].index + 1).first {
@@ -210,4 +253,119 @@ internal val pageKeyboardInsetsMethod = findMethodDirect {
             it.opcode in listOf(Opcode.INVOKE_STATIC.opCode, Opcode.INVOKE_STATIC_RANGE.opCode) &&
                     it.methodRef?.paramTypes?.map { it.descriptor } == listOf("Landroid/view/View;")
         }.methodRef!!
+}
+
+internal object PivotBarRendererFingerprint : Fingerprint(
+    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.STATIC),
+    parameters = listOf("L"),
+    returnType = "Lj$/util/Optional;",
+    filters = listOf(
+        literal(117501096L),
+        opcode(Opcode.IF_NE),
+        opcode(Opcode.CHECK_CAST),
+        methodCall(
+            opcode = Opcode.INVOKE_DIRECT_RANGE,
+            definingClass = "this",
+            name = "<init>",
+            returnType = "V"
+        ),
+        opcode(Opcode.RETURN_OBJECT)
+    )
+)
+
+@get:RequireAppVersion(minVersion = "21.35.000")
+internal val pivotBarItemRendererClass = findClassDirect {
+    PivotBarRendererFingerprint.instructionMatches[2].instruction.classRef!!
+}
+
+internal val pivotBarItemDefaultInstance = findFieldDirect {
+    val type = PivotBarRendererFingerprint.match().method.paramTypes.single()
+    type.fields.single {
+        Modifier.isStatic(it.modifiers) && Modifier.isFinal(it.modifiers) && it.type.descriptor == type.descriptor
+    }
+}
+
+@get:RequireAppVersion(minVersion = "21.35.000")
+internal val pivotBarItemMessageField = findFieldDirect {
+    PivotBarRendererFingerprint.match().method.declaredClass!!.fields.single {
+        it.type!!.descriptor == "Lcom/google/protobuf/MessageLite;"
+    }
+}
+
+@RequireAppVersion(minVersion = "21.35.000")
+internal object PivotBarRendererListFingerprint : Fingerprint(
+    parameters = listOf("L"),
+    returnType = "V",
+    filters = listOf(
+        fieldAccess(opcode = Opcode.IGET_OBJECT, definingClass = "this", type = "L"),
+        methodCall(opcode = Opcode.INVOKE_STATIC, parameters = listOf("L"), returnType = "L"),
+        fieldAccess(opcode = Opcode.IPUT_OBJECT, definingClass = "this", type = "L"),
+        literal(45633821L)
+    )
+)
+
+@get:RequireAppVersion(minVersion = "21.35.000")
+internal val pivotBarRendererListMethod = findMethodDirect {
+    val matches = PivotBarRendererListFingerprint.instructionMatches
+    matches[1].instruction.methodRef!!.also {
+        check(it.returnType!!.descriptor == matches[2].instruction.fieldRef!!.type!!.descriptor)
+    }
+}
+
+@get:RequireAppVersion(minVersion = "21.35.000")
+internal val pivotBarRendererListBuilderMethod = findMethodDirect {
+    Fingerprint(
+        accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.STATIC),
+        returnType = PivotBarRendererListFingerprint.instructionMatches[2].instruction.fieldRef!!.type!!.descriptor,
+        parameters = listOf("Ljava/util/Collection;")
+    ).match().method
+}
+
+/**
+ * Tabs of the browse response (singleColumnBrowseResultsRenderer).
+ * The tab protos are converted to tab items, that are cached in a field of the class.
+ */
+@RequireAppVersion(minVersion = "21.35.000")
+internal object BrowseResponseTabsFingerprint : Fingerprint(
+    interfaces = listOf("Landroid/os/Parcelable;"),
+    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL, AccessFlags.DECLARED_SYNCHRONIZED),
+    returnType = "L",
+    parameters = listOf(),
+    filters = listOf(
+        literal(58173949L),
+        methodCall(
+            opcode = Opcode.INVOKE_STATIC,
+            name = "stream",
+            parameters = listOf("Ljava/util/Collection;")
+        ),
+        fieldAccess(opcode = Opcode.IPUT_OBJECT, definingClass = "this")
+    )
+)
+
+@get:RequireAppVersion(minVersion = "21.35.000")
+internal val browseResponseTabsStreamMethod = findMethodDirect {
+    BrowseResponseTabsFingerprint.instructionMatches[1].instruction.methodRef!!
+}
+
+/**
+ * Creates a navigation bar item proto with a browse endpoint.
+ * Parameters: browse id, label, icon type, icon only.
+ */
+@RequireAppVersion(minVersion = "21.35.000")
+internal object PivotBarItemProtoFactoryFingerprint : Fingerprint(
+    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.STATIC),
+    returnType = "L",
+    parameters = listOf("Ljava/lang/String;", "Ljava/lang/String;", "L", "Z"),
+    filters = listOf(literal(117501096L))
+)
+
+@get:RequireAppVersion(minVersion = "21.35.000")
+internal val pivotBarIconTypeLookupMethod = findMethodDirect {
+    val iconType = PivotBarItemProtoFactoryFingerprint.match().method.paramTypes[2].descriptor
+    Fingerprint(
+        definingClass = iconType,
+        isStatic = true,
+        returnType = iconType,
+        parameters = listOf("I")
+    ).match().method
 }

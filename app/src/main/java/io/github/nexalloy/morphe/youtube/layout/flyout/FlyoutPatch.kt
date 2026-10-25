@@ -1,8 +1,6 @@
 package io.github.nexalloy.morphe.youtube.layout.flyout
 
 import android.app.Dialog
-import android.widget.FrameLayout
-import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
 import app.morphe.extension.shared.ResourceUtils
@@ -106,21 +104,6 @@ val flyoutPatch = patch(
             FlyoutUtils.setCurrentButtonInfo(enumValue as? Enum<*>, textView)
         }
     })
-
-    FlyoutUtils::class.java.getDeclaredMethod(
-        "getFlyoutMenuInfo", Any::class.java, Int::class.javaPrimitiveType
-    ).hookMethod {
-        after {
-            if (it.result == null) {
-                val popupWindow = it.args[0] as? PopupWindow
-                val root = popupWindow?.contentView as? FrameLayout
-                val menuContainer = root?.getChildAt(0) as? LinearLayout
-                if (menuContainer != null) {
-                    it.result = FlyoutUtils.FlyoutMenuInfo(menuContainer, it.args[1] as Int, popupWindow)
-                }
-            }
-        }
-    }
 }
 
 private fun wrapMap(map: Map<*, *>): Map<*, *> {

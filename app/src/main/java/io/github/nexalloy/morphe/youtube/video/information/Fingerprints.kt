@@ -1,5 +1,6 @@
 package io.github.nexalloy.morphe.youtube.video.information
 
+import io.github.nexalloy.RequireAppVersion
 import io.github.nexalloy.SkipTest
 import io.github.nexalloy.morphe.AccessFlags
 import io.github.nexalloy.morphe.Fingerprint
@@ -38,23 +39,64 @@ internal val channelInformationMethods = findMethodListDirect {
     }
 }
 
+private fun getChannelIdFingerprint(playerResponseType: String) = Fingerprint(
+    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
+    returnType = "V",
+    parameters = listOf("Ljava/lang/Object;"),
+    filters = listOf(
+        // Is live stream.
+        methodCall(definingClass = playerResponseType, returnType = "Z"),
+        // Channel id. 21.17 places the live stream check far before it.
+        methodCall(
+            definingClass = playerResponseType,
+            returnType = "Ljava/lang/String;"
+        ),
+        string(
+            "com.google.android.apps.youtube.mdx.watch.LAST_MEALBAR_PROMOTED_LIVE_FEED_CHANNELS",
+            location = MatchAfterWithin(20)
+        )
+    )
+)
+
 internal val playerResponseIsLiveMethod = findMethodDirect {
     val playerResponseType = channelInformationMethods().first().paramTypes.first().descriptor
+    getChannelIdFingerprint(playerResponseType).instructionMatches[0].instruction.methodRef!!
+}
+
+internal val playerResponseChannelIdMethod = findMethodDirect {
+    val playerResponseType = channelInformationMethods().first().paramTypes.first().descriptor
+    getChannelIdFingerprint(playerResponseType).instructionMatches[1].instruction.methodRef!!
+}
+
+internal val playerResponseChannelNameMethod = findMethodDirect {
+    val playerResponseType = channelInformationMethods().first().paramTypes.first().descriptor
     Fingerprint(
-        accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
-        returnType = "V",
-        parameters = listOf("Ljava/lang/Object;"),
         filters = listOf(
-            methodCall(definingClass = playerResponseType, returnType = "Z"),
+            string("setMetadata may only be called once"),
             methodCall(
                 definingClass = playerResponseType,
                 returnType = "Ljava/lang/String;",
                 location = MatchAfterWithin(30)
-            ),
-            string(
-                "com.google.android.apps.youtube.mdx.watch.LAST_MEALBAR_PROMOTED_LIVE_FEED_CHANNELS",
-                location = MatchAfterWithin(20)
             )
+        )
+    ).instructionMatches.last().instruction.methodRef!!
+}
+
+@get:RequireAppVersion("21.29.000")
+internal val playerResponseVideoTitleMethod = findMethodDirect {
+    val playerResponseType = channelInformationMethods().first().paramTypes.first().descriptor
+    Fingerprint(
+        accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.STATIC),
+        returnType = "Ljava/lang/String;",
+        parameters = listOf(playerResponseType),
+        filters = listOf(
+            methodCall(
+                definingClass = playerResponseType,
+                returnType = "Ljava/lang/String;"
+            ),
+            opcode(Opcode.MOVE_RESULT_OBJECT, location = MatchAfterImmediately()),
+            opcode(Opcode.IF_NEZ, location = MatchAfterImmediately()),
+            string("", location = MatchAfterImmediately())
         )
     ).instructionMatches.first().instruction.methodRef!!
 }
