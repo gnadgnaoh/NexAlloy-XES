@@ -10,6 +10,7 @@ import io.github.nexalloy.morphe.tiktok.captcha.HideCaptchaPopups
 import io.github.nexalloy.morphe.tiktok.downloads.AllowRestrictedDownloads
 import io.github.nexalloy.morphe.tiktok.externalbrowser.OpenLinksInBrowser
 import io.github.nexalloy.morphe.tiktok.ghostmode.GhostMode
+import io.github.nexalloy.morphe.tiktok.activestatus.HideActiveStatus
 import io.github.nexalloy.morphe.tiktok.login.DisableLoginRequirement
 import io.github.nexalloy.morphe.tiktok.login.FixGoogleLogin
 import io.github.nexalloy.morphe.tiktok.screencapture.AllowScreenshots
@@ -43,6 +44,7 @@ val TikTokPatches = arrayOf<Patch>(
     AllowScreenshots,
     DisableTelemetry,
     GhostMode,
+    HideActiveStatus,
     SanitizeShareLinks,
     OpenLinksInBrowser,
 
