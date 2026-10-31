@@ -2,6 +2,7 @@ package io.github.nexalloy.revanced.zalo.media
 
 import io.github.nexalloy.morphe.findClassDirect
 import io.github.nexalloy.morphe.findMethodDirect
+import io.github.nexalloy.morphe.findMethodListDirect
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.result.ClassData
 import org.luckypray.dexkit.result.MethodData
@@ -11,6 +12,8 @@ internal const val MEDIA_ITEM_CLASS = "com.zing.zalo.data.mediapicker.model.Medi
 internal const val MEDIA_PICKER_VIEW_CLASS = "com.zing.zalo.ui.picker.mediapicker.MediaPickerView"
 internal const val QUALITY_CHIP_CLASS = "com.zing.zalo.ui.picker.mediapicker.MediaPickerQualityChip"
 
+internal const val EXTRA_PHOTO_HD = "bol_extra_photo_hd"
+internal const val EXTRA_PHOTO_ORIGINAL = "bol_extra_photo_original"
 internal const val QUALITY_STANDARD = "STANDARD"
 internal const val QUALITY_HD = "HD"
 internal const val QUALITY_ORIGINAL = "ORIGINAL"
@@ -198,4 +201,11 @@ val chatMediaStateClassifierFingerprint = findMethodDirect {
             addUsingField("$d->$BIG_FILE_NOT_EXPIRED:$d")
         }
     }.single()
+}
+
+val photoQualityExtraReadersFingerprint = findMethodListDirect {
+    listOf(EXTRA_PHOTO_HD, EXTRA_PHOTO_ORIGINAL)
+        .flatMap { key -> findMethod { matcher { usingEqStrings(key) } } }
+        .filter { it.isMethod }
+        .distinctBy { it.descriptor }
 }
