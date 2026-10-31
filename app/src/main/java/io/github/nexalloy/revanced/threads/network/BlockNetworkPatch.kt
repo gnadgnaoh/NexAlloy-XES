@@ -3,6 +3,7 @@ package io.github.nexalloy.revanced.threads.network
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
 import org.json.JSONObject
+import io.github.nexalloy.revanced.shared.hook.ScopedFrameworkHook
 import io.github.nexalloy.revanced.shared.tigon.TigonRequestHook
 import io.github.nexalloy.revanced.shared.tigon.addTigonRequestRule
 import io.github.nexalloy.revanced.shared.tigon.tigonPreferredUriField
@@ -22,14 +23,9 @@ val BlockNetwork = patch(
         }
     }
     runCatching {
-        val reading = ThreadLocal<Boolean>()
-        ::mqttSettingsFingerprint.hookMethod {
-            before { reading.set(true) }
-            after { reading.remove() }
-        }
-        JSONObject::class.java.getDeclaredMethod("optString", String::class.java, String::class.java).hookMethod {
-            after { if (reading.get() == true && it.args[0] == "analytics_endpoint") it.result = NOWHERE }
-        }
+        val optString = JSONObject::class.java.getDeclaredMethod("optString", String::class.java, String::class.java)
+        ScopedFrameworkHook(optString, after = { if (it.args[0] == "analytics_endpoint") it.result = NOWHERE })
+            .installOn(::mqttSettingsFingerprint.member)
     }
 }
 
