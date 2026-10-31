@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="th_save_video">Save video</string>
+    <string name="th_saving_video">Downloading video…</string>
+    <string name="th_saving_videos">Downloading %1$d videos…</string>
+    <string name="th_saved_video">Video saved to Movies/Threads</string>
+    <string name="th_saved_videos">%1$d videos saved to Movies/Threads</string>
+    <string name="th_save_failed">Download failed: %1$s</string>
+    <string name="th_save_busy">Already downloading, wait a moment</string>
+    <string name="th_no_video">No video to save in this post</string>
+    <string name="th_sheet_subtitle">This post has %1$d videos</string>
+    <string name="th_sheet_all">All videos (%1$d)</string>
+    <string name="th_sheet_page">Video on page %1$d/%2$d</string>
+    <string name="th_pfp_view">View profile picture</string>
+    <string name="th_pfp_save">Save profile picture</string>
+    <string name="th_copy_username">Copy username</string>
+    <string name="th_copy_bio">Copy bio</string>
+    <string name="th_copied">Copied</string>
+    <string name="th_saving_photo">Saving photo…</string>
+    <string name="th_saved_photo">Saved photo to Pictures/Threads</string>
+    <string name="th_pfp_not_found">Couldn\'t find the profile picture</string>
+</resources>

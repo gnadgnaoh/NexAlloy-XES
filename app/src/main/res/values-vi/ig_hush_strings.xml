@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ig_dl_audio_title">Tải âm thanh</string>
+    <string name="ig_toast_downloading_audio">Đang tải âm thanh…</string>
+    <string name="ig_toast_audio_saved">Đã lưu âm thanh</string>
+    <string name="ig_toast_no_audio">Mục này không có âm thanh để lưu</string>
+    <string name="ig_follows_you">Theo dõi bạn</string>
+    <string name="ig_doesnt_follow_you">Không theo dõi bạn</string>
+    <string name="ig_following_each_other">Theo dõi nhau</string>
+    <string name="ig_profile_pic_view">Xem ảnh đại diện</string>
+    <string name="ig_profile_pic_download">Tải ảnh đại diện</string>
+    <string name="ig_copy_username">Copy username</string>
+    <string name="ig_copy_bio">Copy bio</string>
+    <string name="ig_copied">Đã sao chép</string>
+    <string name="ig_active_at">Hoạt động lúc %1$s</string>
+    <string name="ig_saved_label">Đã lưu</string>
+    <string name="ig_mention_one">1 lượt nhắc</string>
+    <string name="ig_mentions_many">%1$d lượt nhắc</string>
+    <string name="ig_mentions_title">Được nhắc trong story này</string>
+    <string name="ig_close">Đóng</string>
+</resources>

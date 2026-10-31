@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fb_dl_download_to_phone">Tải về máy</string>
+    <string name="fb_dl_download">Tải xuống</string>
+    <string name="fb_dl_saving">Đang lưu…</string>
+    <string name="fb_dl_saved_video">Đã lưu video vào Movies/Facebook</string>
+    <string name="fb_dl_saved_photo">Đã lưu ảnh vào Pictures/Facebook</string>
+    <string name="fb_dl_failed">Không lưu được: %1$s</string>
+    <string name="fb_dl_busy">Đang có lượt tải khác. Thử lại sau giây lát.</string>
+    <string name="fb_dl_no_video">Không tìm thấy video. Hãy phát video một chút rồi thử lại.</string>
+    <string name="fb_dl_save_gif">Lưu GIF</string>
+    <string name="fb_dl_saved_gif">Đã lưu GIF vào Pictures/Facebook</string>
+</resources>

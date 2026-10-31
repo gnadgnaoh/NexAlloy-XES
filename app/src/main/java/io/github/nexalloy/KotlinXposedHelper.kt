@@ -167,11 +167,17 @@ fun String.findClass(classLoader: ClassLoader?): Class<*> = findClass(this, clas
 
 infix fun String.on(classLoader: ClassLoader?): Class<*> = findClass(this, classLoader)
 
+fun findClassSafely(className: String, classLoader: ClassLoader?): Class<*>? = try {
+    findClassIfExists(className, classLoader)
+} catch (e: LinkageError) {
+    null
+}
+
 fun String.findClassOrNull(classLoader: ClassLoader?): Class<*>? =
-    findClassIfExists(this, classLoader)
+    findClassSafely(this, classLoader)
 
 infix fun String.from(classLoader: ClassLoader?): Class<*>? =
-    findClassIfExists(this, classLoader)
+    findClassSafely(this, classLoader)
 
 fun Class<*>.new(vararg args: Any?): Any = newInstance(this, *args)
 

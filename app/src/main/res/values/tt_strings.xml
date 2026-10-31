@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tt_bio_copied">Bio copied</string>
+    <string name="tt_username_copied">Username copied</string>
+    <string name="tt_user_id_copied">User ID copied</string>
+    <string name="tt_video_id_copied">Video ID copied</string>
+    <string name="tt_copy_username">Copy username</string>
+    <string name="tt_copy_user_id">Copy user ID</string>
+    <string name="tt_copy_video_id">Copy video ID</string>
+    <string name="tt_follows_you">Follows you</string>
+    <string name="tt_not_following_back">Doesn\'t follow you back</string>
+    <string name="tt_save_sound">Save sound</string>
+    <string name="tt_save_cover">Save cover</string>
+    <string name="tt_saving">Saving…</string>
+    <string name="tt_saved_video">Video saved to Movies/TikTok</string>
+    <string name="tt_saved_photo">Saved to Pictures/TikTok</string>
+    <string name="tt_saved_photos">%1$d photos saved to Pictures/TikTok</string>
+    <string name="tt_saved_sound">Sound saved to Music/TikTok</string>
+    <string name="tt_saved_avatar">Profile picture saved to Pictures/TikTok</string>
+    <string name="tt_save_failed">Couldn\'t save: %1$s</string>
+    <string name="tt_busy">Other saves are still running. Try again in a moment.</string>
+    <string name="tt_nothing_to_save">Nothing to save here</string>
+    <string name="tt_avatar_view">View profile picture</string>
+    <string name="tt_avatar_save">Save profile picture</string>
+    <string name="tt_avatar_load_failed">Couldn\'t load the profile picture</string>
+    <string name="tt_sticker_view">View sticker</string>
+    <string name="tt_sticker_save">Save sticker</string>
+    <string name="tt_saved_sticker">Sticker saved to Pictures/TikTok</string>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="zl_dl_saving">Đang tải…</string>
+    <string name="zl_dl_saved_photo">Đã lưu ảnh vào Pictures/Zalo</string>
+    <string name="zl_dl_saved_video">Đã lưu video vào Movies/Zalo</string>
+    <string name="zl_dl_failed">Tải không thành công: %1$s</string>
+    <string name="zl_dl_no_media">Không có gì để tải</string>
+    <string name="zl_dl_stream_only">Video này chỉ có dạng phát trực tuyến, chưa hỗ trợ tải</string>
+    <string name="zl_dl_busy">Đang tải quá nhiều, thử lại sau giây lát</string>
+    <string name="zl_dl_all_menu">Tải tất cả (%1$d)</string>
+    <string name="zl_dl_all_start">Đang tải %1$d mục…</string>
+    <string name="zl_dl_all_done">Đã lưu %1$d/%2$d mục</string>
+    <string name="zl_dl_all_more">Còn %1$d ảnh chưa tải được, hãy mở bài để tải đủ</string>
+    <string name="zl_dl_all_stream">%1$d video chỉ có dạng phát trực tuyến nên bị bỏ qua</string>
+</resources>

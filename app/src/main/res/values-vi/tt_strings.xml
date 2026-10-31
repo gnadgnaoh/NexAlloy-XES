@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tt_bio_copied">Đã copy bio</string>
+    <string name="tt_username_copied">Đã copy username</string>
+    <string name="tt_user_id_copied">Đã copy user ID</string>
+    <string name="tt_video_id_copied">Đã copy video ID</string>
+    <string name="tt_copy_username">Copy username</string>
+    <string name="tt_copy_user_id">Copy user ID</string>
+    <string name="tt_copy_video_id">Copy video ID</string>
+    <string name="tt_follows_you">Có follow bạn</string>
+    <string name="tt_not_following_back">Không follow lại bạn</string>
+    <string name="tt_save_sound">Lưu âm thanh</string>
+    <string name="tt_save_cover">Lưu ảnh bìa</string>
+    <string name="tt_saving">Đang lưu…</string>
+    <string name="tt_saved_video">Đã lưu video vào Movies/TikTok</string>
+    <string name="tt_saved_photo">Đã lưu vào Pictures/TikTok</string>
+    <string name="tt_saved_photos">Đã lưu %1$d ảnh vào Pictures/TikTok</string>
+    <string name="tt_saved_sound">Đã lưu âm thanh vào Music/TikTok</string>
+    <string name="tt_saved_avatar">Đã lưu ảnh đại diện vào Pictures/TikTok</string>
+    <string name="tt_save_failed">Không lưu được: %1$s</string>
+    <string name="tt_busy">Đang có lượt lưu khác. Thử lại sau giây lát.</string>
+    <string name="tt_nothing_to_save">Không có gì để lưu</string>
+    <string name="tt_avatar_view">Xem ảnh đại diện</string>
+    <string name="tt_avatar_save">Lưu ảnh đại diện</string>
+    <string name="tt_avatar_load_failed">Không tải được ảnh đại diện</string>
+    <string name="tt_sticker_view">Xem sticker</string>
+    <string name="tt_sticker_save">Tải sticker</string>
+    <string name="tt_saved_sticker">Đã lưu sticker vào Pictures/TikTok</string>
+</resources>

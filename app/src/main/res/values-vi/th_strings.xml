@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="th_save_video">Lưu video</string>
+    <string name="th_saving_video">Đang tải video…</string>
+    <string name="th_saving_videos">Đang tải %1$d video…</string>
+    <string name="th_saved_video">Đã lưu video vào Movies/Threads</string>
+    <string name="th_saved_videos">Đã lưu %1$d video vào Movies/Threads</string>
+    <string name="th_save_failed">Tải thất bại: %1$s</string>
+    <string name="th_save_busy">Đang tải, đợi chút nhé</string>
+    <string name="th_no_video">Bài này không có video để lưu</string>
+    <string name="th_sheet_subtitle">Bài này có %1$d video</string>
+    <string name="th_sheet_all">Tất cả video (%1$d)</string>
+    <string name="th_sheet_page">Video ở trang %1$d/%2$d</string>
+    <string name="th_pfp_view">Xem ảnh đại diện</string>
+    <string name="th_pfp_save">Tải ảnh đại diện</string>
+    <string name="th_copy_username">Sao chép username</string>
+    <string name="th_copy_bio">Sao chép tiểu sử</string>
+    <string name="th_copied">Đã sao chép</string>
+    <string name="th_saving_photo">Đang tải ảnh…</string>
+    <string name="th_saved_photo">Đã lưu ảnh vào Pictures/Threads</string>
+    <string name="th_pfp_not_found">Không tìm thấy ảnh đại diện</string>
+</resources>

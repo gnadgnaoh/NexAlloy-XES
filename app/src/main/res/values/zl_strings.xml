@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="zl_dl_saving">Downloading…</string>
+    <string name="zl_dl_saved_photo">Photo saved to Pictures/Zalo</string>
+    <string name="zl_dl_saved_video">Video saved to Movies/Zalo</string>
+    <string name="zl_dl_failed">Download failed: %1$s</string>
+    <string name="zl_dl_no_media">Nothing to download here</string>
+    <string name="zl_dl_stream_only">This video is only available as a stream, which can\'t be saved yet</string>
+    <string name="zl_dl_busy">Too many downloads at once, try again in a moment</string>
+    <string name="zl_dl_all_menu">Download all (%1$d)</string>
+    <string name="zl_dl_all_start">Downloading %1$d items…</string>
+    <string name="zl_dl_all_done">Saved %1$d/%2$d items</string>
+    <string name="zl_dl_all_more">%1$d more photos weren\'t loaded, open the post to get them all</string>
+    <string name="zl_dl_all_stream">%1$d videos are stream-only and were skipped</string>
+</resources>

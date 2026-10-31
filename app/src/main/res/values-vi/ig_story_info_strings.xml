@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ig_btn_story_info">Thông tin tin</string>
+    <string name="ig_btn_quiz_answer">Đáp án câu đố</string>
+    <string name="ig_btn_poll_results">Kết quả bình chọn</string>
+    <string name="ig_btn_slider_results">Kết quả thanh trượt</string>
+    <string name="ig_si_hint">Chạm vào một dòng để sao chép.</string>
+    <string name="ig_si_posted">Đăng lúc</string>
+    <string name="ig_si_expires">Hết hạn lúc</string>
+    <string name="ig_si_edited">Đã sửa</string>
+    <string name="ig_si_yes">Có</string>
+    <string name="ig_si_music">Nhạc</string>
+    <string name="ig_si_location">Vị trí</string>
+    <string name="ig_si_hashtags">Hashtag</string>
+    <string name="ig_si_shared_from">Chia sẻ lại từ</string>
+    <string name="ig_si_original_post">Bài gốc</string>
+    <string name="ig_si_paid_partnership">Hợp tác có trả phí</string>
+    <string name="ig_si_collaborators">Cộng tác</string>
+    <string name="ig_si_posted_with">Đăng bằng</string>
+    <string name="ig_si_alt_text">Văn bản thay thế</string>
+    <string name="ig_si_size">Kích thước</string>
+    <string name="ig_si_sound_on">có tiếng</string>
+    <string name="ig_si_sound_off">không tiếng</string>
+    <string name="ig_si_countdown">Đếm ngược</string>
+    <string name="ig_si_question">Câu hỏi</string>
+    <string name="ig_si_add_yours">Thêm của bạn</string>
+    <string name="ig_si_joined">người tham gia</string>
+    <string name="ig_si_none">Tin này không có thêm thông tin.</string>
+    <string name="ig_si_your_answer">Câu trả lời của bạn</string>
+    <string name="ig_si_average">Trung bình</string>
+    <string name="ig_si_votes">Lượt bình chọn</string>
+    <string name="ig_si_copied">Đã sao chép</string>
+    <string name="ig_si_close">Đóng</string>
+    <string name="ig_si_open_in">Mở trên %1$s</string>
+</resources>

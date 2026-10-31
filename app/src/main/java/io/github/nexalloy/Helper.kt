@@ -6,6 +6,7 @@ import android.content.res.loader.ResourcesProvider
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.annotation.RequiresApi
+import app.morphe.extension.shared.Logger
 import app.morphe.extension.shared.Utils
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -182,6 +183,30 @@ fun Context.addModuleAssets() {
     resources.assets.callMethod("addAssetPath", moduleFile.path)
 }
 
+// Module layouts (e.g. morphe_sb_inline_sponsor_overlay.xml) reference module classes
+// (app.morphe.*) via class attributes. When the host app inflates these layouts, its
+// ClassLoader cannot find those classes.
+// This method injects the module's ClassLoader into the host's classloader chain by
+// replacing host.parent with a proxy ClassLoader that delegates app.morphe.* lookups
+// to the module's own ClassLoader before falling back to the original parent.
+fun injectSelfClassLoaderToHost(self: ClassLoader, host: ClassLoader) {
+    val findClassMethod =
+        XposedHelpers.findMethodExact(ClassLoader::class.java, "findClass", String::class.java)
+    host.setObjectField("parent", object : ClassLoader(host.parent) {
+        override fun findClass(name: String): Class<*> {
+            try {
+                if (name.startsWith("app.morphe")) {
+                    return findClassMethod(self, name) as Class<*>
+                }
+            } catch (_: ClassNotFoundException) {
+                Logger.printException { "Unexcepted ClassNotFoundException: $name" }
+            }
+
+            throw ClassNotFoundException(name)
+        }
+    })
+}
+
 fun injectHostClassLoaderToSelf(self: ClassLoader, host: ClassLoader) {
     val findClassMethod =
         XposedHelpers.findMethodExact(ClassLoader::class.java, "findClass", String::class.java)
@@ -201,8 +226,10 @@ fun injectHostClassLoaderToSelf(self: ClassLoader, host: ClassLoader) {
          *   before delegating to `parent.loadClass`. So, this customization might seem redundant for LSPosed.
          *
          * - **Other Xposed Frameworks:** Other frameworks might use a standard `PathClassLoader`
-         *   as the module's ClassLoader. It delegates to its parent before trying its own classes,
-         *   so explicitly checking module classes here keeps the same module-first ordering.
+         *   as the module's ClassLoader. A standard `PathClassLoader` typically delegates to
+         *   `parent.loadClass` *before* attempting `findClass` itself. If the host ClassLoader's parent
+         *   is replaced with another intermediary ClassLoader that attempts to load classes from the module
+         *   (see `SponsorBlockPatch.kt`), it could lead to infinite recursion.
          *
          * By inserting this intermediary ClassLoader and overriding `findClass` to prioritize
          * `self.findClass()`, we ensure that the module's classes are always checked first,
