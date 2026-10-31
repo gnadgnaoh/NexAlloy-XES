@@ -76,9 +76,11 @@ private object SavedTab {
         }
     }
 
+    private val ids = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     @SuppressLint("DiscouragedApi")
     private fun find(root: View, name: String): View? {
-        val id = root.resources.getIdentifier(name, "id", root.context.packageName)
+        val id = ids.getOrPut(name) { root.resources.getIdentifier(name, "id", root.context.packageName) }
         return if (id == 0) null else root.findViewById(id)
     }
 
