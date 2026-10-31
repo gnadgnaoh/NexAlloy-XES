@@ -9,7 +9,7 @@ val FixGoogleLogin = patch(
     name = "Fix Google login",
     description = "Forces TikTok's web-based Google sign-in. Only needed when the APK was re-signed " +
             "(LSPatch or a repackaged build), where Play Services rejects the native flow.",
-    use = false,
+    use = true,
 ) {
     GOOGLE_AUTH_CLASS.findClass(classLoader)
         .getDeclaredMethod("isAvailable")
