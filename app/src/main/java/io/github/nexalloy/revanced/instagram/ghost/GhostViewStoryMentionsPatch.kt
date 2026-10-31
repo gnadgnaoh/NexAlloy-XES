@@ -16,6 +16,7 @@ import io.github.nexalloy.patch
 private const val MENTIONS_BTN_TAG = "ie_story_mentions_btn"
 
 @Volatile private var sCachedStoryOptionsId = 0
+@Volatile private var sStoryOptionsResolved = false
 
 val GhostViewStoryMentions = patch(
     name = "View story mentions",
@@ -27,13 +28,14 @@ val GhostViewStoryMentions = patch(
             val view = param.thisObject as? View ?: return@after
             val ctx = view.context ?: return@after
 
-            if (sCachedStoryOptionsId == 0) {
+            if (!sStoryOptionsResolved) {
                 @SuppressLint("DiscouragedApi")
                 val id = ctx.resources.getIdentifier(
                     "reel_viewer_options_container", "id", ctx.packageName
                 ).takeIf { it != 0 }
                     ?: ctx.resources.getIdentifier("story_viewer_options", "id", ctx.packageName)
                 sCachedStoryOptionsId = id
+                sStoryOptionsResolved = true
             }
 
             if (sCachedStoryOptionsId == 0 || view.id != sCachedStoryOptionsId) return@after
