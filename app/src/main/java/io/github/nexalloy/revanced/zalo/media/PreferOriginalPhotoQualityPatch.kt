@@ -4,15 +4,13 @@ import app.morphe.extension.shared.Logger
 import de.robv.android.xposed.XC_MethodReplacement
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
+import io.github.nexalloy.revanced.shared.hook.ScopedFrameworkHook
 import io.github.nexalloy.revanced.zalo.ads.remoteConfigIntGetterFingerprint
 import java.lang.reflect.Modifier
 
 private const val ALLOW_SEND_ORIGINAL_KEY = "media_picker@pick_quality@allow_send_original_photo"
 
-private val FORCED_TRUE_EXTRAS = setOf(
-    "bol_extra_photo_hd",
-    "bol_extra_photo_original",
-)
+private val FORCED_TRUE_EXTRAS = setOf(EXTRA_PHOTO_HD, EXTRA_PHOTO_ORIGINAL)
 
 val PreferOriginalPhotoQuality = patch(
     name = "Prefer original photo quality",
@@ -74,14 +72,14 @@ val PreferOriginalPhotoQuality = patch(
         }
     }
 
+    val readers = ::photoQualityExtraReadersFingerprint.dexMethodList.map { it.toMethod() }
     android.os.BaseBundle::class.java.declaredMethods
         .filter { it.name == "getBoolean" && it.parameterTypes.firstOrNull() == String::class.java }
         .forEach { method ->
-            method.hookMethod {
-                before { param ->
-                    if (param.args[0] in FORCED_TRUE_EXTRAS) param.result = true
-                }
-            }
+            val hook = ScopedFrameworkHook(method, before = { param ->
+                if (param.args[0] in FORCED_TRUE_EXTRAS) param.result = true
+            })
+            readers.forEach(hook::installOn)
         }
 
     Logger.printInfo { "[Zalo] Prefer original photo quality: ORIGINAL=$original HD=$hd" }
